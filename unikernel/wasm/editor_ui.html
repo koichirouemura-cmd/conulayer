@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Unikernel Text Editor</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #1a1a1a;
+    color: #e0e0e0;
+    font-family: 'Courier New', Consolas, monospace;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  header {
+    background: #111;
+    padding: 10px 16px;
+    border-bottom: 1px solid #333;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-shrink: 0;
+  }
+
+  header h1 {
+    font-size: 15px;
+    color: #aaa;
+    font-weight: normal;
+    letter-spacing: 1px;
+  }
+
+  .main {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* ── Left panel: file list ────────────────────── */
+  .sidebar {
+    width: 220px;
+    background: #2a2a2a;
+    border-right: 1px solid #333;
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+  }
+
+  .sidebar-header {
+    padding: 10px 12px;
+    font-size: 11px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    border-bottom: 1px solid #333;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-shrink: 0;
+  }
+
+  #btn-new {
+    background: #3a3a3a;
+    border: 1px solid #555;
+    color: #ccc;
+    padding: 2px 8px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 11px;
+    font-family: inherit;
+  }
+
+  #btn-new:hover { background: #4a4a4a; }
+
+  #file-list {
+    list-style: none;
+    overflow-y: auto;
+    flex: 1;
+  }
+
+  #file-list li {
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 13px;
+    border-bottom: 1px solid #222;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: #ccc;
+  }
+
+  #file-list li:hover { background: #333; }
+  #file-list li.active { background: #383838; color: #fff; border-left: 2px solid #5a9fd4; }
+
+  /* ── Right panel: editor ──────────────────────── */
+  .editor-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .editor-toolbar {
+    background: #222;
+    padding: 8px 12px;
+    border-bottom: 1px solid #333;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  #filename-input {
+    background: #1a1a1a;
+    border: 1px solid #444;
+    color: #e0e0e0;
+    padding: 4px 8px;
+    font-family: inherit;
+    font-size: 13px;
+    border-radius: 3px;
+    width: 200px;
+  }
+
+  #filename-input:focus {
+    outline: none;
+    border-color: #5a9fd4;
+  }
+
+  #btn-save {
+    background: #2a5a8a;
+    border: 1px solid #3a7ac0;
+    color: #e0e0e0;
+    padding: 4px 14px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 13px;
+    font-family: inherit;
+  }
+
+  #btn-save:hover { background: #3a6a9a; }
+  #btn-save:disabled { opacity: 0.5; cursor: default; }
+
+  #editor {
+    flex: 1;
+    background: #1e1e1e;
+    color: #d4d4d4;
+    border: none;
+    resize: none;
+    padding: 16px;
+    font-family: 'Courier New', Consolas, monospace;
+    font-size: 14px;
+    line-height: 1.6;
+    outline: none;
+    overflow-y: auto;
+    tab-size: 2;
+  }
+
+  /* ── Status bar ───────────────────────────────── */
+  .statusbar {
+    background: #111;
+    border-top: 1px solid #333;
+    padding: 4px 12px;
+    font-size: 11px;
+    color: #888;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-shrink: 0;
+  }
+
+  .status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 4px;
+    background: #888;
+  }
+
+  .status-dot.saved   { background: #4caf50; }
+  .status-dot.changed { background: #ff9800; }
+  .status-dot.syncing { background: #5a9fd4; }
+
+  #status-text { display: flex; align-items: center; }
+
+  /* ── New file dialog overlay ──────────────────── */
+  #new-file-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 100;
+    align-items: center;
+    justify-content: center;
+  }
+
+  #new-file-overlay.visible { display: flex; }
+
+  .dialog {
+    background: #2a2a2a;
+    border: 1px solid #444;
+    border-radius: 6px;
+    padding: 20px;
+    width: 320px;
+  }
+
+  .dialog h2 { font-size: 14px; color: #ccc; margin-bottom: 12px; font-weight: normal; }
+
+  .dialog input {
+    width: 100%;
+    background: #1a1a1a;
+    border: 1px solid #444;
+    color: #e0e0e0;
+    padding: 6px 8px;
+    font-family: inherit;
+    font-size: 13px;
+    border-radius: 3px;
+    margin-bottom: 12px;
+  }
+
+  .dialog input:focus { outline: none; border-color: #5a9fd4; }
+
+  .dialog-buttons { display: flex; gap: 8px; justify-content: flex-end; }
+
+  .dialog-buttons button {
+    background: #3a3a3a;
+    border: 1px solid #555;
+    color: #ccc;
+    padding: 5px 14px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 12px;
+    font-family: inherit;
+  }
+
+  .dialog-buttons button.primary {
+    background: #2a5a8a;
+    border-color: #3a7ac0;
+    color: #e0e0e0;
+  }
+
+  .dialog-buttons button:hover { background: #4a4a4a; }
+  .dialog-buttons button.primary:hover { background: #3a6a9a; }
+</style>
+</head>
+<body>
+<header>
+  <h1>UNIKERNEL EDITOR</h1>
+</header>
+
+<div class="main">
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <span>Files</span>
+      <button id="btn-new">+ New</button>
+    </div>
+    <ul id="file-list"></ul>
+  </div>
+
+  <!-- Editor panel -->
+  <div class="editor-panel">
+    <div class="editor-toolbar">
+      <input id="filename-input" type="text" placeholder="filename.txt" spellcheck="false">
+      <button id="btn-save">Save</button>
+    </div>
+    <textarea id="editor" spellcheck="false" placeholder="Select a file or create a new one..."></textarea>
+  </div>
+</div>
+
+<div class="statusbar">
+  <span id="status-text"><span class="status-dot" id="status-dot"></span><span id="status-label">Ready</span></span>
+</div>
+
+<!-- New file dialog -->
+<div id="new-file-overlay">
+  <div class="dialog">
+    <h2>Create New File</h2>
+    <input id="new-filename-input" type="text" placeholder="filename.txt" spellcheck="false">
+    <div class="dialog-buttons">
+      <button id="btn-cancel-new">Cancel</button>
+      <button class="primary" id="btn-confirm-new">Create</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  'use strict';
+
+  const fileList       = document.getElementById('file-list');
+  const editor         = document.getElementById('editor');
+  const filenameInput  = document.getElementById('filename-input');
+  const btnSave        = document.getElementById('btn-save');
+  const btnNew         = document.getElementById('btn-new');
+  const statusDot      = document.getElementById('status-dot');
+  const statusLabel    = document.getElementById('status-label');
+  const overlay        = document.getElementById('new-file-overlay');
+  const newNameInput   = document.getElementById('new-filename-input');
+  const btnCancelNew   = document.getElementById('btn-cancel-new');
+  const btnConfirmNew  = document.getElementById('btn-confirm-new');
+
+  let currentFile  = null;   // currently open filename
+  let savedContent = '';     // last saved content
+  let isEditing    = false;  // true while user has focus
+  let pollTimer    = null;
+
+  // ── Status helpers ────────────────────────────────────────────────
+  function setStatus(type, text) {
+    statusDot.className = 'status-dot ' + type;
+    statusLabel.textContent = text;
+  }
+
+  // ── File list rendering ───────────────────────────────────────────
+  function renderFileList(files) {
+    fileList.innerHTML = '';
+    files.forEach(function(name) {
+      const li = document.createElement('li');
+      li.textContent = name;
+      if (name === currentFile) li.classList.add('active');
+      li.addEventListener('click', function() { openFile(name); });
+      fileList.appendChild(li);
+    });
+  }
+
+  // ── Fetch file list ───────────────────────────────────────────────
+  function fetchFileList() {
+    return fetch('/editor/api/files')
+      .then(function(r) { return r.json(); })
+      .then(function(files) {
+        renderFileList(files);
+        return files;
+      })
+      .catch(function(e) {
+        console.error('fetchFileList error:', e);
+        return [];
+      });
+  }
+
+  // ── Open a file ───────────────────────────────────────────────────
+  function openFile(name) {
+    setStatus('syncing', 'Loading...');
+    fetch('/editor/api/read', { method: 'POST', body: name })
+      .then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.text();
+      })
+      .then(function(content) {
+        currentFile      = name;
+        savedContent     = content;
+        editor.value     = content;
+        filenameInput.value = name;
+        setStatus('saved', 'Saved');
+        // update active highlight
+        Array.from(fileList.children).forEach(function(li) {
+          li.classList.toggle('active', li.textContent === name);
+        });
+      })
+      .catch(function(e) {
+        console.error('openFile error:', e);
+        setStatus('changed', 'Error loading file');
+      });
+  }
+
+  // ── Save current file ─────────────────────────────────────────────
+  function saveFile() {
+    const name    = filenameInput.value.trim();
+    const content = editor.value;
+    if (!name) { setStatus('changed', 'Enter a filename'); return; }
+
+    setStatus('syncing', 'Saving...');
+    btnSave.disabled = true;
+
+    const body = name + '\n' + content;
+    fetch('/editor/api/save', { method: 'POST', body: body })
+      .then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        currentFile  = name;
+        savedContent = content;
+        setStatus('saved', 'Saved');
+        // refresh list in case a new file was created
+        return fetchFileList();
+      })
+      .catch(function(e) {
+        console.error('saveFile error:', e);
+        setStatus('changed', 'Save failed');
+      })
+      .finally(function() {
+        btnSave.disabled = false;
+      });
+  }
+
+  // ── Poll for updates (only when not editing) ──────────────────────
+  function startPolling() {
+    pollTimer = setInterval(function() {
+      if (isEditing) return;
+      if (!currentFile) {
+        fetchFileList();
+        return;
+      }
+      // reload current file if unchanged locally, then fetch file list
+      if (editor.value === savedContent) {
+        fetch('/editor/api/read', { method: 'POST', body: currentFile })
+          .then(function(r) { return r.ok ? r.text() : null; })
+          .then(function(content) {
+            if (content !== null && content !== savedContent) {
+              savedContent = content;
+              editor.value = content;
+              setStatus('saved', 'Updated');
+            }
+            return fetchFileList();
+          })
+          .catch(function() {});
+      } else {
+        fetchFileList();
+      }
+    }, 5000);
+  }
+
+  // ── Detect editing state ──────────────────────────────────────────
+  editor.addEventListener('focus',  function() { isEditing = true; });
+  editor.addEventListener('blur',   function() { isEditing = false; });
+  editor.addEventListener('input',  function() {
+    if (editor.value !== savedContent) {
+      setStatus('changed', 'Unsaved changes');
+    } else {
+      setStatus('saved', 'Saved');
+    }
+  });
+
+  // Tab key inserts spaces instead of changing focus
+  editor.addEventListener('keydown', function(e) {
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const start = editor.selectionStart;
+      const end   = editor.selectionEnd;
+      editor.value = editor.value.slice(0, start) + '  ' + editor.value.slice(end);
+      editor.selectionStart = editor.selectionEnd = start + 2;
+    }
+    // Ctrl+S / Cmd+S to save
+    if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+      e.preventDefault();
+      saveFile();
+    }
+  });
+
+  // ── Save button ───────────────────────────────────────────────────
+  btnSave.addEventListener('click', saveFile);
+
+  // ── New file dialog ───────────────────────────────────────────────
+  btnNew.addEventListener('click', function() {
+    newNameInput.value = '';
+    overlay.classList.add('visible');
+    setTimeout(function() { newNameInput.focus(); }, 50);
+  });
+
+  btnCancelNew.addEventListener('click', function() {
+    overlay.classList.remove('visible');
+  });
+
+  function createNewFile() {
+    const name = newNameInput.value.trim();
+    if (!name) return;
+    overlay.classList.remove('visible');
+    currentFile      = name;
+    savedContent     = '';
+    editor.value     = '';
+    filenameInput.value = name;
+    setStatus('changed', 'New file (unsaved)');
+    editor.focus();
+  }
+
+  btnConfirmNew.addEventListener('click', createNewFile);
+  newNameInput.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') createNewFile();
+    if (e.key === 'Escape') overlay.classList.remove('visible');
+  });
+
+  overlay.addEventListener('click', function(e) {
+    if (e.target === overlay) overlay.classList.remove('visible');
+  });
+
+  // ── Init ──────────────────────────────────────────────────────────
+  setStatus('', 'Ready');
+  fetchFileList();
+  startPolling();
+
+})();
+</script>
+</body>
+</html>

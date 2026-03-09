@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Earthquake Monitor</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <style>
+    body, html {
+      margin: 0; padding: 0; height: 100%;
+      font-family: 'Helvetica Neue', Arial, sans-serif;
+      background: #e0e0e0;
+      overflow: hidden;
+    }
+
+    #map { width: 100%; height: 100%; z-index: 0; }
+
+    /* ── Left floating panel ── */
+    #quake-container {
+      position: absolute;
+      top: 20px; left: 20px;
+      width: 350px;
+      bottom: 20px;
+      background: rgba(255,255,255,0.95);
+      border-radius: 10px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+      z-index: 1000;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .quake-header {
+      padding: 10px 15px;
+      border-bottom: 1px solid #f0f0f0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #fff;
+      flex-shrink: 0;
+    }
+    .quake-title { font-weight: bold; font-size: 0.9em; color: #333; }
+
+    .live-badge {
+      display: flex; align-items: center; gap: 6px;
+      color: #00bcd4; font-size: 0.75em; font-weight: bold; text-transform: uppercase;
+    }
+    .live-dot {
+      width: 8px; height: 8px;
+      background: #00bcd4; border-radius: 50%;
+      animation: blink 1.5s infinite;
+    }
+    @keyframes blink {
+      0%   { opacity: 1; transform: scale(1); }
+      50%  { opacity: 0.4; transform: scale(1.2); }
+      100% { opacity: 1; transform: scale(1); }
+    }
+
+    #updated {
+      font-size: 0.65em; color: #999;
+      padding: 4px 15px;
+      border-bottom: 1px solid #f0f0f0;
+      background: #fafafa;
+      flex-shrink: 0;
+    }
+
+    #quake-list { flex: 1; overflow-y: auto; background: #fff; }
+    #quake-list::-webkit-scrollbar { width: 4px; }
+    #quake-list::-webkit-scrollbar-thumb { background: #ddd; border-radius: 2px; }
+
+    /* ── List items ── */
+    .quake-item {
+      padding: 8px 15px;
+      border-bottom: 1px solid #f9f9f9;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .quake-item:hover { background: #f5f5f5; }
+    .quake-item.fresh { border-left: 3px solid #00bcd4; }
+
+    .quake-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 4px;
+    }
+    .quake-place { font-weight: bold; font-size: 1.1em; color: #333; }
+    .quake-mag   { font-weight: bold; font-size: 1.3em; color: #00bcd4; white-space: nowrap; }
+
+    .quake-bottom {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.7em; color: #999;
+    }
+    .quake-time  { font-size: 1.4em; color: #000; font-weight: bold; line-height: 1; }
+    .shindo-badge {
+      background: #f0f0f0; padding: 2px 6px;
+      border-radius: 3px; color: #555;
+      font-weight: bold; font-size: 1.2em;
+    }
+
+    /* Age-based opacity on list items */
+    .age6  { opacity: 0.8; }
+    .age24 { opacity: 0.55; }
+    .age72 { opacity: 0.3; }
+
+    /* Pulse animation for fresh markers */
+    @keyframes pulse-stroke {
+      0%, 100% { stroke-opacity: 0.9; stroke-width: 1.5; }
+      50%       { stroke-opacity: 0.15; stroke-width: 5; }
+    }
+    .quake-fresh path { animation: pulse-stroke 2s ease-in-out infinite; }
+
+    /* Tooltip */
+    .eq-tip {
+      background: #fff !important;
+      border: 1px solid #ddd !important;
+      color: #333 !important;
+      font-family: monospace !important;
+      font-size: 12px !important;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15) !important;
+    }
+  </style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<div id="quake-container">
+  <div class="quake-header">
+    <span class="quake-title">Earthquake Monitor</span>
+    <span class="live-badge"><span class="live-dot"></span>Live</span>
+  </div>
+  <div id="updated">Connecting...</div>
+  <div id="quake-list"></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+
+// ── Map ──────────────────────────────────────────────────────
+const map = L.map('map', { zoomControl: false }).setView([36.5, 138], 5);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+  attribution: '&copy; OpenStreetMap &copy; CARTO',
+  subdomains: 'abcd', maxZoom: 19,
+}).addTo(map);
+L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+// ── Helpers ──────────────────────────────────────────────────
+// p2pquake time: "2026/03/08 15:06:00" (JST)
+function parseTime(t) {
+  const [date, time] = t.split(' ');
+  const [y, mo, d] = date.split('/');
+  const [h, mi, s] = time.split(':');
+  return new Date(Date.UTC(+y, +mo - 1, +d, +h - 9, +mi, +s));
+}
+function ageH(t) { return (Date.now() - parseTime(t)) / 3_600_000; }
+
+// p2pquake maxScale → 表示文字列
+function scaleLabel(s) {
+  const m = {10:'1', 20:'2', 30:'3', 40:'4', 45:'5-', 50:'5+', 55:'6-', 60:'6+', 70:'7'};
+  return m[s] || 'N/A';
+}
+
+function fmtTime(t) {
+  return parseTime(t).toLocaleString('ja-JP', {
+    timeZone: 'Asia/Tokyo',
+    month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  }).replace(',', '');
+}
+function timeHHMM(t) {
+  return parseTime(t).toLocaleTimeString('ja-JP', {
+    timeZone: 'Asia/Tokyo', hour: '2-digit', minute: '2-digit', hour12: false,
+  });
+}
+
+function magColor(mag) {
+  const m = parseFloat(mag);
+  if (m >= 6) return '#ff2040';
+  if (m >= 5) return '#f85149';
+  if (m >= 4) return '#f0883e';
+  if (m >= 3) return '#00bcd4';
+  if (m >= 2) return '#8b949e';
+  return '#aaa';
+}
+function magRadius(mag) { return Math.max(5, Math.exp(parseFloat(mag) * 0.55) * 1.2); }
+function ageOpacity(h) {
+  if (h < 1)  return 0.90;
+  if (h < 6)  return 0.70;
+  if (h < 24) return 0.42;
+  if (h < 72) return 0.16;
+  return 0;
+}
+function ageItemClass(h) {
+  if (h < 6)  return '';
+  if (h < 24) return 'age6';
+  if (h < 72) return 'age24';
+  return 'age72';
+}
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── State ────────────────────────────────────────────────────
+let markers = [];
+
+// ── Render ───────────────────────────────────────────────────
+function render(data) {
+  markers.forEach(m => map.removeLayer(m));
+  markers = [];
+
+  const quakes = data
+    .filter(q => q.earthquake && q.earthquake.hypocenter && q.earthquake.hypocenter.latitude !== -200)
+    .map(q => {
+      const hp = q.earthquake.hypocenter;
+      return {
+        name:  hp.name,
+        mag:   hp.magnitude,
+        lat:   hp.latitude,
+        lon:   hp.longitude,
+        scale: q.earthquake.maxScale,
+        time:  q.earthquake.time,
+        _h:    ageH(q.earthquake.time),
+      };
+    })
+    .filter(q => q._h < 72 && q.lat && q.lon)
+    .sort((a, b) => parseTime(b.time) - parseTime(a.time));
+
+  // ─ List ─
+  const listEl = document.getElementById('quake-list');
+  listEl.innerHTML = quakes.map((q, i) => {
+    const fresh = q._h < 1;
+    return `
+    <div class="quake-item ${ageItemClass(q._h)} ${fresh ? 'fresh' : ''}"
+         data-lat="${q.lat}" data-lon="${q.lon}">
+      <div class="quake-top">
+        <span class="quake-place">${esc(q.name)}</span>
+        <span class="quake-mag">M${esc(q.mag)}</span>
+      </div>
+      <div class="quake-bottom">
+        <span class="quake-time">${timeHHMM(q.time)}</span>
+        <span class="shindo-badge">Shindo ${esc(scaleLabel(q.scale))}</span>
+      </div>
+      <div style="font-size:0.6em;color:#bbb;margin-top:2px;">Hypocenter (JA)</div>
+    </div>`;
+  }).join('');
+
+  listEl.querySelectorAll('.quake-item').forEach(el => {
+    el.addEventListener('click', () => {
+      const lat = parseFloat(el.dataset.lat);
+      const lon = parseFloat(el.dataset.lon);
+      if (!isNaN(lat) && !isNaN(lon)) map.flyTo([lat, lon], 7, { duration: 0.8 });
+    });
+  });
+
+  // ─ Map markers ─
+  quakes.forEach((q, i) => {
+    const opacity = ageOpacity(q._h);
+    if (opacity === 0) return;
+
+    const isLatest = i === 0;
+    const r     = isLatest ? magRadius(q.mag) * 1.4 : magRadius(q.mag);
+    const color = isLatest ? '#00bcd4' : '#aaa';
+    const fresh = q._h < 1;
+    const pos   = [q.lat, q.lon];
+
+    if (fresh) {
+      markers.push(L.circleMarker(pos, {
+        radius: r * 2.2, color, weight: 1,
+        fillOpacity: 0, opacity: 0.35,
+        className: 'quake-fresh',
+      }).addTo(map));
+    }
+
+    markers.push(L.circleMarker(pos, {
+      radius: r,
+      color: 'white', weight: 1,
+      fillColor: color, fillOpacity: 0.8,
+      className: fresh ? 'quake-fresh' : '',
+    })
+    .bindTooltip(
+      `<b>Hypocenter: ${esc(q.name)}</b><br>M${esc(q.mag)} · Shindo ${esc(scaleLabel(q.scale))}<br>${fmtTime(q.time)}`,
+      { direction: 'top', className: 'eq-tip' }
+    )
+    .addTo(map));
+  });
+
+  // ─ Status ─
+  const t = new Date().toLocaleTimeString('ja-JP', {
+    timeZone: 'Asia/Tokyo',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  });
+  document.getElementById('updated').textContent = `${quakes.length} events · updated ${t} JST`;
+}
+
+// ── Fetch ────────────────────────────────────────────────────
+function load() {
+  fetch('/api/quake')
+    .then(r => { if (!r.ok) throw r; return r.json(); })
+    .then(render)
+    .catch(() => {
+      document.getElementById('updated').textContent = 'fetch error – retrying…';
+    });
+}
+
+load();
+setInterval(load, 60_000);
+</script>
+</body>
+</html>

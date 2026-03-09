@@ -1,0 +1,19 @@
+#!/sbin/openrc-run
+description="vsock file I/O server for unikernel"
+
+command="/usr/bin/python3"
+command_args="/usr/local/bin/vsock-file-server.py"
+command_background=true
+pidfile="/run/${RC_SVCNAME}.pid"
+output_log="/var/log/vsock-file-server.log"
+error_log="/var/log/vsock-file-server.log"
+
+depend() {
+    need net
+    after localmount
+}
+
+start_pre() {
+    mkdir -p /data
+    checkpath -d -m 0755 /data
+}
