@@ -61,6 +61,14 @@ else
     echo "    Downloaded: $(du -h ${INSTALL_DIR}/unikernel.iso | cut -f1)"
 fi
 
+# ── 4b. WASM モジュール & UI ダウンロード ──────────────────────────────
+echo "==> Downloading WASM modules..."
+RELEASE_BASE="${REPO}/releases/latest/download"
+for f in app.wasm bbs.wasm editor.wasm eq.html bbs.html editor.html; do
+    curl -fsSL "${RELEASE_BASE}/${f}" -o "${REGISTRY_DIR}/${f}"
+done
+echo "    Done."
+
 # ── 5. vsock secret handler ───────────────────────────────────────────
 echo "==> Installing vsock secret handler..."
 cat > /usr/local/bin/vsock-secret-handler << 'HANDLER'
