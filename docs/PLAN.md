@@ -411,29 +411,7 @@ Survey as of March 2026.
 
 ---
 
-## 8. Roadmap
-
-> The following are not yet implemented.
-
-### Phase 7: ARM64 Support
-
-- Design allows adding `src/arch/aarch64/` without changing upper layers
-- Native execution on Apple Silicon Mac
-- x86_64 shared code remains unchanged
-
-### MCP Server Integration (Extended)
-
-unikernel operations (deploy/logs/status) are already implemented via MCP.
-Next: extend MCP to cover Alpine secret management operations.
-
-### DHCP Support / Distributable ISO
-
-Currently using static IP (10.0.2.15).
-DHCP support would enable "download the ISO and boot anywhere."
-
----
-
-## 9. References
+## 8. References
 
 - [hermit-os/kernel](https://github.com/hermit-os/kernel) — Rust no_std unikernel (closest reference implementation)
 - [syswonder/RuxOS](https://github.com/syswonder/ruxos) — Rust unikernel
