@@ -445,12 +445,11 @@ Unikernel:
 
 **Difference: ~20x (at idle)**
 
-#### Annual electricity consumption and CO2 (1 application)
+#### Annual electricity consumption (1 application)
 
 | | Flask configuration | Unikernel | Reduction |
 |---|---|---|---|
 | Annual electricity | 276 kWh | 14 kWh | 262 kWh |
-| CO2 equivalent | 138 kg-CO2 | 7 kg-CO2 | 131 kg-CO2 |
 
 #### 1,000 applications in production (annual)
 
@@ -458,15 +457,15 @@ Unikernel:
 Flask configuration:
   Servers needed: 1,000 apps × 425MB ÷ 128GB = ~4 servers
   Annual electricity: 4 servers × 200W × 8,760h × 1.5 = 10,512 kWh
-  CO2 emissions: 5,256 kg-CO2 ≈ 5.3 tonnes
 
 Unikernel:
   Servers needed: 1,000 apps × 8MB ÷ 128GB = less than 1 server
   Annual electricity: 1 server × 200W × 8,760h × 1.5 = 2,628 kWh
-  CO2 emissions: 1,314 kg-CO2 ≈ 1.3 tonnes
 
-Reduction: 7,884 kWh/year, approximately 4.0 tonnes-CO2/year
+Reduction: 7,884 kWh/year
 ```
+
+*Note: CO2 conversion figures are omitted here. CO2 per kWh varies significantly by region and energy mix — apply your local grid factor to the electricity figures above.*
 
 #### Comparison with AI-driven energy growth
 
@@ -871,8 +870,6 @@ Server costs            4 servers            1 server      3 servers/year
 Electricity             10,512 kWh           2,628 kWh     7,884 kWh/year
 AI coding               $25,000/year         $2,500/year   $22,500/year
 Security maintenance    2 engineer-weeks     Near zero     significant
-──────────────────────────────────────────────────────────────────────
-CO2 reduction:                                              ~4 tonnes/year
 ```
 
 ### AI Coding Break-Even Point
@@ -1317,7 +1314,7 @@ Docker version on port 8081, Unikernel version adds routing to existing port 808
 *Measured values: unikernel binary 1.7MB, app.wasm 557B, bbs.wasm 1.2KB,
 eq_ui.html 9.9KB, boot time ~1 second, memory ~8MB (KVM guest, measured).
 Estimated values reference Ubuntu 22.04 Server minimal configuration + standard Flask setup + NVD data, etc.
-Power and CO2 figures are estimates using industry-standard coefficients. Actual values vary by environment.*
+Power figures are estimates using industry-standard coefficients. Actual values vary by environment.*
 
 *Unified data source (from 2026-03-08): both configurations use the p2pquake API. Apple-to-Apple comparison.*
 
