@@ -14,6 +14,7 @@
 set -e
 
 REPO="https://github.com/koichirouemura-cmd/conulayer"
+RAW="https://raw.githubusercontent.com/koichirouemura-cmd/conulayer/main"
 RELEASE_URL="${REPO}/releases/latest/download/unikernel.iso"
 INSTALL_DIR="/opt/conulayer"
 REGISTRY_DIR="/var/registry"
@@ -24,12 +25,13 @@ echo ""
 
 # ── 1. パッケージインストール ──────────────────────────────────────────
 echo "==> Installing packages..."
+# Enable community repo (needed for qemu, py3-pip)
+sed -i '/^#.*\/community$/s/^#//' /etc/apk/repositories
 apk update -q
 apk add -q \
     python3 py3-pip \
     qemu-system-x86_64 qemu-img \
     socat \
-    wabt \
     curl
 
 # ── 2. KVM確認 ────────────────────────────────────────────────────────
@@ -99,9 +101,9 @@ chmod +x /etc/init.d/vsock-secret-server
 
 # ── 7. vsock file サービス ────────────────────────────────────────────
 echo "==> Installing vsock-file-server service..."
-curl -fsSL "${REPO}/raw/main/alpine/vsock-file-server.py" \
+curl -fsSL "${RAW}/alpine/vsock-file-server.py" \
     -o /usr/local/bin/vsock-file-server.py
-curl -fsSL "${REPO}/raw/main/alpine/vsock-file-server.openrc" \
+curl -fsSL "${RAW}/alpine/vsock-file-server.openrc" \
     -o /etc/init.d/vsock-file-server
 chmod +x /usr/local/bin/vsock-file-server.py
 chmod +x /etc/init.d/vsock-file-server
@@ -162,14 +164,14 @@ chmod +x /etc/init.d/unikernel
 # ── 10. MCP サーバー ──────────────────────────────────────────────────
 echo "==> Installing MCP server..."
 mkdir -p /opt/mcp-server
-curl -fsSL "${REPO}/raw/main/alpine/mcp-server/server.py" \
+curl -fsSL "${RAW}/alpine/mcp-server/server.py" \
     -o /opt/mcp-server/server.py
-curl -fsSL "${REPO}/raw/main/alpine/mcp-server/requirements.txt" \
+curl -fsSL "${RAW}/alpine/mcp-server/requirements.txt" \
     -o /opt/mcp-server/requirements.txt
 python3 -m venv /opt/mcp-server/.venv
 /opt/mcp-server/.venv/bin/pip install -q -r /opt/mcp-server/requirements.txt
 
-curl -fsSL "${REPO}/raw/main/alpine/mcp-server/mcp-server.openrc" \
+curl -fsSL "${RAW}/alpine/mcp-server/mcp-server.openrc" \
     -o /etc/init.d/mcp-server
 chmod +x /etc/init.d/mcp-server
 
