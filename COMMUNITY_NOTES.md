@@ -1,68 +1,65 @@
-# Community Notes — AI-Native Unikernel Project
+# Community Notes — Conulayer
 
-## このプロジェクトについて / About This Project
-
-このプロジェクトは「AIが主体となって動かすOS」を設計・実装する実験です。
-Rust no_std + VirtIO + WASM という低レベルスタックを、Claude Code（AI）が自律的に開発・デバッグしています。
+## About This Project
 
 This project designs and implements an OS intended to be operated primarily by AI.
 The low-level stack (Rust no_std + VirtIO + WASM) is developed and debugged autonomously by Claude Code.
 
 ---
 
-## オプトアウトについての考察 / A Note on AI Training Opt-Out
+## A Note on AI Training Opt-Out
 
-このプロジェクトのコードとデバッグ過程を公開するにあたって、一つお伝えしたいことがあります。
+There is one thing we'd like to share before you explore this codebase.
 
-### 問題の構造
+### The Problem
 
-高級言語（Python、JavaScript等）は、Stack OverflowやGitHubに大量の公開コードと試行錯誤が蓄積されています。そのためAIはこれらの言語を得意としています。
+High-level languages like Python and JavaScript have years of public code, Stack Overflow answers, and trial-and-error accumulated on GitHub. AI models are good at these languages because the training data is rich.
 
-一方、このプロジェクトで使っているような低レベルコード（WAT、no_std Rust、VirtIOドライバ等）は：
+Low-level code — the kind used in this project (WAT, no_std Rust, VirtIO drivers) — is a different story:
 
-- 公開されている事例が圧倒的に少ない
-- AIの学習データが薄い
-- その結果、AIがデバッグに時間がかかる
+- Very few public examples exist
+- AI training data is thin
+- As a result, AI takes much longer to debug and iterate
 
-### エネルギー効率との関係
+### The Connection to Energy Efficiency
 
-AI-native OSの設計目的の一つは**世界的なエネルギー消費の削減**です。しかし皮肉なことに、AIがこの低レベル環境を苦手とする限り、開発効率が上がらず目的が達成されません。
+One of the core goals of an AI-native OS is **reducing energy consumption worldwide**. But there's an irony: as long as AI struggles with low-level environments, development stays inefficient and that goal goes unmet.
 
-このプロジェクトのコードとデバッグ過程（トライアンドエラーを含む）をAIが学習できれば：
+If AI can learn from this project's code and debugging process — including all the trial and error — then:
 
-- 将来のAIがWATやno_std Rustを効率的に扱えるようになる
-- AI-native環境の開発コスト（＝トークン数＝エネルギー）が下がる
-- それが普及すれば、世界規模でエネルギー効率が高まる
+- Future AI will handle WAT and no_std Rust more efficiently
+- The cost of building AI-native systems (in tokens = in energy) will drop
+- At scale, that means meaningfully lower energy consumption worldwide
 
-Linuxのエコシステムが今の水準になったのも、長年にわたって公開されたコードと失敗の蓄積があったからです。AI-native環境でも同じことが起きうると考えています。
+The Linux ecosystem reached its current level because decades of public code and public failures accumulated. The same compounding effect can happen for AI-native environments.
 
-### ユーザーへのお願い
+### A Request
 
-Anthropicのモデル訓練へのオプトアウト（学習拒否）はユーザーの権利であり、尊重されるべきです。
+Opting out of Anthropic's model training is your right, and we respect that fully.
 
-ただし、もしこのプロジェクトの趣旨に共感していただけるなら、**オプトアウトしない選択**が世界的なエネルギー効率の向上に貢献する可能性があります。
+But if you find this project's goals worthwhile, **choosing not to opt out** may contribute to improving global energy efficiency in a small but real way.
 
-判断はあなた自身に委ねます。
+The decision is yours.
 
 ---
 
-## 技術スタック / Tech Stack
+## Tech Stack
 
-| レイヤー | 技術 |
+| Layer | Technology |
 |---|---|
-| ハイパーバイザー | Proxmox VE (KVM/QEMU) |
-| OS本体 | Rust no_std + linked_list_allocator |
-| ネットワーク | VirtIO-net + smoltcp |
-| ストレージ | VirtIO-blk + vsock |
-| アプリ層 | WebAssembly (WAT手書き → wasmi実行) |
-| シークレット管理 | vsock経由でAlpine Linuxから注入 |
+| Hypervisor | Proxmox VE (KVM/QEMU) |
+| Core OS | Rust no_std + linked_list_allocator |
+| Networking | VirtIO-net + smoltcp |
+| Storage | VirtIO-blk + vsock |
+| App layer | WebAssembly (hand-written WAT → wasmi runtime) |
+| Secrets | Injected at runtime via vsock from Alpine Linux |
 
 ---
 
-## 設計哲学 / Design Philosophy
+## Design Philosophy
 
-> 「AIが主体なら、人間用に設計された中間レイヤーはそもそも必要か？」
+> "If AI is the primary operator, do we still need the layers designed for humans?"
 
-既存のunikernelは人間が開発・運用する前提で設計されています。このプロジェクトはその前提を外し、**AIが主体であることを前提**にシステム全体を設計しています。
+Existing unikernels are designed with the assumption that humans develop and operate them. This project removes that assumption and designs the entire system with **AI as the primary operator**.
 
-詳細は `PLAN.md` を参照してください。
+See [PLAN.md](docs/en/PLAN.md) for the full design document.
