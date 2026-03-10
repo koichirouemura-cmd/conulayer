@@ -96,9 +96,7 @@ See [comparison_report.md](docs/comparison_report.md) for full benchmark details
 
 ## Quick Start
 
-See [MANUAL.md](MANUAL.md) for build and deployment instructions.
-
-Requirements: Rust (nightly), QEMU, GRUB (i686-elf), `gh` CLI
+See [MANUAL.md](docs/MANUAL.md) for setup and Claude Code integration instructions.
 
 ---
 
@@ -113,7 +111,7 @@ See [COMMUNITY_NOTES.md](COMMUNITY_NOTES.md) for the full story.
 ## Docs
 
 - [PLAN.md](docs/PLAN.md) — Design philosophy, architecture, and implementation record
-- [MANUAL.md](docs/en/MANUAL.md) — Build and operation manual
+- [MANUAL.md](docs/MANUAL.md) — Setup and Claude Code integration
 - [comparison_report.md](docs/comparison_report.md) — Benchmark comparisons vs. Linux baseline
 - [COMMUNITY_NOTES.md](COMMUNITY_NOTES.md) — Notes on AI training, opt-out, and energy efficiency
 
