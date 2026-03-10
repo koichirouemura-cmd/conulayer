@@ -1,1326 +1,1324 @@
-# 完全比較レポート
-## 伝統的Webスタック vs AI-Native Unikernel
-### ——同一アプリ・Apple-to-Apple 比較——
+# Comprehensive Comparison Report
+## Traditional Web Stack vs. AI-Native Unikernel
+### — Same Application, Apple-to-Apple Comparison —
 
-**バージョン**: 2.1（2026-03-08 追記）
-**対象アプリ**: p2pquake API → JSON整形 → Leaflet地図表示（地震モニター）
-**実装状態**: 両構成とも同一データソース・同一UIで実稼働中
-**実測環境**: Proxmox KVM / Mac Studio M4 Max 36GB / Alpine Linux 3.x
-
----
-
-## 目次
-
-1. [設計思想の比較](#1-設計思想の比較)
-2. [アーキテクチャ構造の比較](#2-アーキテクチャ構造の比較)
-3. [AI開発コスト（トークン・設計アーキテクチャ分析）](#3-ai開発コストトークン設計アーキテクチャ分析)
-4. [物理資源の比較](#4-物理資源の比較)
-5. [エネルギー消費とCO2排出](#5-エネルギー消費とco2排出)
-6. [セキュリティ攻撃面の比較](#6-セキュリティ攻撃面の比較)
-7. [レイテンシ・パフォーマンス](#7-レイテンシパフォーマンス)
-8. [スケーラビリティ](#8-スケーラビリティ)
-9. [運用・デプロイサイクル](#9-運用デプロイサイクル)
-10. [依存関係・脆弱性露出面](#10-依存関係脆弱性露出面)
-11. [再利用性とレジストリ効果](#11-再利用性とレジストリ効果)
-12. [総合比較表](#12-総合比較表)
-13. [スケール試算（1000アプリ）](#13-スケール試算1000アプリ)
-14. [この設計が成立する条件](#14-この設計が成立する条件)
-15. [なぜこの問いが今まで立てられなかったか](#15-なぜこの問いが今まで立てられなかったか)
-16. [利用可能性と限界の考察](#16-利用可能性と限界の考察)
+**Version**: 2.1 (updated 2026-03-08)
+**Target application**: p2pquake API → JSON formatting → Leaflet map display (earthquake monitor)
+**Implementation status**: Both configurations running in production with identical data sources and identical UI
+**Measurement environment**: Proxmox KVM / Mac Studio M4 Max 36GB / Alpine Linux 3.x
 
 ---
 
-## 1. 設計思想の比較
+## Table of Contents
 
-### 伝統的スタックの前提
+1. [Design Philosophy Comparison](#1-design-philosophy-comparison)
+2. [Architecture Structure Comparison](#2-architecture-structure-comparison)
+3. [AI Development Cost (Token & Design Architecture Analysis)](#3-ai-development-cost-token--design-architecture-analysis)
+4. [Physical Resource Comparison](#4-physical-resource-comparison)
+5. [Energy Consumption and CO2 Emissions](#5-energy-consumption-and-co2-emissions)
+6. [Security Attack Surface Comparison](#6-security-attack-surface-comparison)
+7. [Latency and Performance](#7-latency-and-performance)
+8. [Scalability](#8-scalability)
+9. [Operations and Deployment Cycle](#9-operations-and-deployment-cycle)
+10. [Dependencies and Vulnerability Exposure](#10-dependencies-and-vulnerability-exposure)
+11. [Reusability and Registry Effects](#11-reusability-and-registry-effects)
+12. [Comprehensive Comparison Table](#12-comprehensive-comparison-table)
+13. [Scale Estimation (1,000 Applications)](#13-scale-estimation-1000-applications)
+14. [Conditions for This Design to Work](#14-conditions-for-this-design-to-work)
+15. [Why This Question Was Never Asked Before](#15-why-this-question-was-never-asked-before)
+16. [Applicability and Limitations](#16-applicability-and-limitations)
+
+---
+
+## 1. Design Philosophy Comparison
+
+### Assumptions of the Traditional Stack
 
 ```
-人間が開発する → 人間が読めるコード・設定ファイル
-人間が運用する → CLIで操作、ダッシュボードで監視
-人間が保守する → バージョンアップ、依存関係管理
+Humans develop it  → Human-readable code and configuration files
+Humans operate it  → Managed via CLI, monitored via dashboard
+Humans maintain it → Version upgrades, dependency management
 ```
 
-この前提に基づき、「アプリに必要な機能」より「人間が扱いやすくするレイヤー」が積み上がる。
+Based on these assumptions, layers designed to make things easier for humans accumulate on top of the actual application functionality.
 
 ```
-Ubuntu Linux（人間が管理できるOSが必要）
-  └─ systemd（人間がプロセスを管理できる必要がある）
-      └─ Docker（人間が環境を再現できる必要がある）
-          └─ nginx（人間がリクエストルーティングを設定できる必要がある）
-              └─ gunicorn（人間がWSGIを管理できる必要がある）
-                  └─ Python 3.x（人間が読めるコードが必要）
-                      └─ Flask（人間が理解できるフレームワークが必要）
-                          └─ app.py ← アプリ本体（約80行）
+Ubuntu Linux (a human-manageable OS is required)
+  └─ systemd (humans need to be able to manage processes)
+      └─ Docker (humans need to be able to reproduce environments)
+          └─ nginx (humans need to be able to configure request routing)
+              └─ gunicorn (humans need to be able to manage WSGI)
+                  └─ Python 3.x (humans need to be able to read the code)
+                      └─ Flask (humans need to be able to understand the framework)
+                          └─ app.py ← The application itself (~80 lines)
 ```
 
-**アプリが実際にやること:**
+**What the application actually does:**
 ```python
 resp = requests.get('https://api.p2pquake.net/v2/history?codes=551&limit=10')
 return jsonify(resp.json())
 ```
 
-この2行のために上記すべてが存在する。
+Everything listed above exists for the sake of these two lines.
 
 ---
 
-### AI-Native Unikernelの前提
+### Assumptions of the AI-Native Unikernel
 
 ```
-AIが生成する  → 最小・検証済みのバイナリ
-AIが運用する  → シリアルログを読んで自己修正
-AIが再利用する → レジストリからコンポーネントを取得
+AI generates it   → Minimal, verified binaries
+AI operates it    → Reads serial logs and self-corrects
+AI reuses it      → Fetches components from a registry
 ```
 
-人間用の中間レイヤーは設計から排除される。
+Intermediate layers designed for humans are excluded from the design entirely.
 
 ```
-KVM ハイパーバイザー（ハードウェア仮想化）
-  └─ Alpine Linux（シークレット管理・ファイル操作専用 = BIOSと同じ位置づけ）
-      └─ Rust no_std unikernel（1.7MB）
-          └─ wasmi WASMランタイム
-              └─ app.wasm ← アプリ本体（557バイト）
+KVM hypervisor (hardware virtualization)
+  └─ Alpine Linux (dedicated to secrets management and file operations = equivalent to BIOS)
+      └─ Rust no_std unikernel (1.7MB)
+          └─ wasmi WASM runtime
+              └─ app.wasm ← The application itself (557 bytes)
 ```
 
-**app.watが実際にやること（WATソース・65行）:**
+**What app.wat actually does (WAT source, 65 lines):**
 ```wat
-;; HTTPヘッダーをメモリに書く
+;; Write HTTP headers into memory
 (memory.copy (i32.const 0) (i32.const 200028) (i32.const 102))
-;; Alpine nginx経由でp2pquakeデータを取得してバッファに書く
+;; Fetch p2pquake data via Alpine nginx and write into buffer
 (local.set $n (call $get_feed (i32.const 102) (i32.const 195000)))
-;; ヘッダー + データのサイズを返す
+;; Return size of headers + data
 (i32.add (i32.const 102) (local.get $n))
 ```
 
 ---
 
-### UI層とAI層の境界線
+### The Boundary Between the UI Layer and the AI Layer
 
-このプロジェクトの設計には明確な境界線がある。
+This project draws a clear boundary in its design.
 
 ```
-AIが動かす部分（unikernel）:
-  → 人間用レイヤーは不要
-  → 最小化すべき
-  → app.wasm = 557バイト
+The part AI runs (unikernel):
+  → No human-oriented layers needed
+  → Should be minimized
+  → app.wasm = 557 bytes
 
-人間が見る部分（UI）:
-  → 人間用インフラを使うべき
-  → 豊かであるべき
-  → Leaflet.js（CDN）+ CartoDB地図タイル
+The part humans see (UI):
+  → Human-oriented infrastructure should be used
+  → Should be rich and expressive
+  → Leaflet.js (CDN) + CartoDB map tiles
 ```
 
-eq_ui.htmlはCDNからLeaflet.jsを動的に取得する。これは「妥協」ではなく「正しい設計判断」である。描画・インタラクション・地図タイルは人間が見るためのものであり、人間のために設計されたインフラ（CDN）を使うのが最適。
+eq_ui.html dynamically fetches Leaflet.js from a CDN. This is not a "compromise" — it is the correct design decision. Rendering, interaction, and map tiles exist for humans to see, and using infrastructure designed for humans (CDNs) is the optimal choice.
 
-「AIが動かす部分からは人間用レイヤーを排除する。人間が見る部分には人間用インフラを使う。」この境界線の明確化がこのアーキテクチャの設計原則のひとつである。
+"Remove human-oriented layers from the parts AI runs. Use human-oriented infrastructure for the parts humans see." Making this boundary explicit is one of the core design principles of this architecture.
 
 ---
 
-### 思想の核心的差異
+### Core Differences in Philosophy
 
-| 観点 | 伝統的スタック | AI-Native Unikernel |
+| Dimension | Traditional Stack | AI-Native Unikernel |
 |---|---|---|
-| 設計の主体 | 人間 | AI |
-| 中間レイヤーの目的 | 人間が扱いやすくするため | 存在しない（不要） |
-| 抽象化の方向 | 複雑さを人間から隠す | 複雑さをそもそも持たない |
-| コードの読者 | 人間エンジニア | AIエージェント |
-| 運用形態 | 人間がSSH・ダッシュボード操作 | AIがログを読んでコード生成 |
-| 障害対応 | 人間がログを読んで判断 | AIがシリアル出力を読んで自己修正 |
-| UI描画 | サーバーサイドレンダリング or SPA | SPA（人間用CDNを積極活用） |
+| Primary actor | Humans | AI |
+| Purpose of intermediate layers | To make things easier for humans | Does not exist (unnecessary) |
+| Direction of abstraction | Hide complexity from humans | Does not carry complexity to begin with |
+| Audience for code | Human engineers | AI agents |
+| Operations model | Humans operate via SSH and dashboards | AI reads logs and generates code |
+| Incident response | Humans read logs and make decisions | AI reads serial output and self-corrects |
+| UI rendering | Server-side rendering or SPA | SPA (actively leveraging human-oriented CDNs) |
 
 ---
 
-## 2. アーキテクチャ構造の比較
+## 2. Architecture Structure Comparison
 
-### リクエスト処理フロー
+### Request Processing Flow
 
-#### 伝統的スタック（Flask構成）
+#### Traditional Stack (Flask configuration)
 
 ```
-ブラウザ
-  → nginx（TLS終端・ルーティング）
-    → gunicorn（WSGIワーカー管理）
-      → Flask app（ルーティング・ミドルウェア）
-        → requests.get（p2pquake API）
-          ← HTTPレスポンス
-        ← jsonify（シリアライズ）
+Browser
+  → nginx (TLS termination, routing)
+    → gunicorn (WSGI worker management)
+      → Flask app (routing, middleware)
+        → requests.get (p2pquake API)
+          ← HTTP response
+        ← jsonify (serialization)
       ← gunicorn worker
-    ← nginx（レスポンスバッファリング）
-  ← ブラウザ
+    ← nginx (response buffering)
+  ← Browser
 
-レイヤー数: 5（nginx / gunicorn / Flask / requests / OS socket）
-コンテキストスイッチ: 複数回
+Number of layers: 5 (nginx / gunicorn / Flask / requests / OS socket)
+Context switches: Multiple
 ```
 
 #### AI-Native Unikernel
 
 ```
-ブラウザ
-  → smoltcp TCP スタック（直接）
-    → WASMルーター（app.wasm）
-      → get_feed()（smoltcpでAlpine nginx → p2pquake API）
-        ← JSONデータ
-      ← HTTPレスポンス（ヘッダー + データ 直接書き込み）
-    ← smoltcp送信
-  ← ブラウザ
+Browser
+  → smoltcp TCP stack (directly)
+    → WASM router (app.wasm)
+      → get_feed() (smoltcp → Alpine nginx → p2pquake API)
+        ← JSON data
+      ← HTTP response (headers + data written directly)
+    ← smoltcp transmission
+  ← Browser
 
-レイヤー数: 2（smoltcp / WASM）
-コンテキストスイッチ: なし（単一アドレス空間）
+Number of layers: 2 (smoltcp / WASM)
+Context switches: None (single address space)
 ```
 
-### コードベースの規模比較
+### Codebase Size Comparison
 
-| 構成要素 | Flask構成 | Unikernel |
+| Component | Flask configuration | Unikernel |
 |---|---|---|
-| OSカーネル | ~2,000万行（Linux） | 0行 |
-| ミドルウェア（nginx等） | ~15万行 | 0行 |
-| ランタイム（Python） | ~40万行 | ~2万行（wasmi） |
-| フレームワーク（Flask等） | ~5万行 | 0行 |
-| **アプリ本体** | **~80行** | **~65行（WAT）** |
-| インフラ設定ファイル | ~200行（nginx.conf / systemd / Dockerfile等） | ~20行（Alpine設定） |
+| OS kernel | ~20 million lines (Linux) | 0 lines |
+| Middleware (nginx, etc.) | ~150,000 lines | 0 lines |
+| Runtime (Python) | ~400,000 lines | ~20,000 lines (wasmi) |
+| Framework (Flask, etc.) | ~50,000 lines | 0 lines |
+| **Application itself** | **~80 lines** | **~65 lines (WAT)** |
+| Infrastructure configuration files | ~200 lines (nginx.conf / systemd / Dockerfile, etc.) | ~20 lines (Alpine config) |
 
-アプリ本体の行数はほぼ同じ。違いは**その周囲に何行あるか**。
+The application code itself is roughly the same size. The difference is **how many lines surround it**.
 
-### ネットワーク設計：QEMUのuser-modeネットワーク
+### Network Design: QEMU User-Mode Networking
 
-unikernelのネットワーク接続には、QEMUの`user-mode`ネットワークを採用している。
+The unikernel's network connectivity uses QEMU's `user-mode` networking.
 
 ```
 -netdev user,id=net0,hostfwd=tcp::8080-:80
 ```
 
-**これは世界的にレアな本番利用である。**
+**This is a globally rare use of user-mode networking in production.**
 
 ```
-一般的な認識:
-  user-modeネットワーク = 開発・テスト用途
-  「遅い・制約が多い・本番では使わない」
+Common perception:
+  user-mode networking = for development and testing
+  "Slow, too many restrictions, not for production"
 
-このプロジェクト:
-  SSH不要（管理インターフェースが存在しない）
-  ブロードキャスト不要（他プロセスがない）
-  hostfwd 1行でHTTP接続が完結
-  → 「制約が多すぎる」→「むしろ隔離が強くて最適」
+This project:
+  No SSH needed (no management interface exists)
+  No broadcast needed (no other processes)
+  HTTP connectivity is complete with one hostfwd line
+  → "Too many restrictions" → "Actually provides stronger isolation — the optimal choice"
 ```
 
-MirageOSはXenハイパーバイザーが主戦場、UnikraftはブリッジネットワークがデフォルトであるのとQEMU user-modeで本番運用している事例はほぼ存在しない。
+MirageOS primarily targets Xen hypervisors, and Unikraft uses bridge networking by default. There are almost no real-world examples of running QEMU user-mode networking in production.
 
-unikernelの「管理が不要」という特性が、逆に「制約が多い」と思われていたネットワーク方式を最適解に変える。人間用の管理インターフェースが不要だからこそ成立する。
+The unikernel's characteristic of requiring no management turns a networking mode previously thought to be "too restricted" into the optimal solution. This works precisely because there is no need for a human-facing management interface.
 
 ---
 
-## 3. AI開発コスト（トークン・設計アーキテクチャ分析）
+## 3. AI Development Cost (Token & Design Architecture Analysis)
 
-### 基本原則：コンテキストウィンドウがコストを決める
+### Core Principle: The Context Window Determines the Cost
 
-AIコーディングのコストは「トークン消費量」で決まる。
-トークン = コンテキストウィンドウに入れる情報量 = お金。
+The cost of AI coding is determined by token consumption.
+Tokens = the amount of information loaded into the context window = money.
 
-**重要な構造的違い:**
-
-```
-Flask開発でAIが毎回コンテキストに持つ必要があるもの:
-  - nginx設定の構文と選択肢
-  - gunicorn worker/timeout/backlog パラメータ
-  - systemd Unit ファイルの書き方
-  - Docker ネットワークモードの選択
-  - Flask ミドルウェアの挙動
-  - Python 依存関係の互換性
-  - デプロイ手順全体
-  ─────────────────────────────
-  → これらは毎回「ゼロから推論」が必要
-  → AIはセッションをまたいで記憶しない = 永遠に初回コスト
-
-Unikernel開発でAIが毎回コンテキストに持つ必要があるもの:
-  - app.wat（65行）
-  - net.rs の関連部分（~50行）
-  ─────────────────────────────
-  → プラットフォーム層は「解決済み・変更しない」
-  → 新規アプリごとに必要なコンテキストが純粋に小さい
-```
-
-### 1アプリ開発に必要なトークン（アーキテクチャ推計）
-
-#### Flask構成
+**The key structural difference:**
 
 ```
-フェーズ              必要コンテキスト                    トークン推計
-──────────────────────────────────────────────────────────────────
-環境設計       nginx/gunicorn/Docker構成の検討            ~8,000
-コード実装     app.py + requirements.txt                  ~6,000
-設定ファイル   nginx.conf + systemd + Dockerfile          ~8,000
-デバッグ       依存関係・バージョン衝突・ポート競合等     ~20,000
-デプロイ       ステップ確認・トラブルシューティング        ~10,000
-UI実装         HTML/CSS/JS（フロントエンド）              ~15,000
-UI調整・修正   往復デバッグ                               ~15,000
-──────────────────────────────────────────────────────────────────
-合計                                                  ~82,000
-費用（Sonnet 4.6: $3/100万トークン）                     ~$0.25
+What AI must carry in context every time for Flask development:
+  - nginx configuration syntax and options
+  - gunicorn worker/timeout/backlog parameters
+  - systemd unit file syntax
+  - Docker network mode choices
+  - Flask middleware behavior
+  - Python dependency compatibility
+  - Entire deployment procedure
+  ─────────────────────────────────────────────────────────
+  → All of these require "reasoning from scratch" every time
+  → AI has no memory across sessions = always paying the first-time cost
+
+What AI must carry in context every time for Unikernel development:
+  - app.wat (65 lines)
+  - Relevant portions of net.rs (~50 lines)
+  ─────────────────────────────────────────────────────────
+  → The platform layer is "already solved — will not change"
+  → The context needed for each new application is inherently small
+```
+
+### Tokens Required to Develop One Application (Architecture Estimate)
+
+#### Flask configuration
+
+```
+Phase                 Context Required                           Token Estimate
+──────────────────────────────────────────────────────────────────────────────
+Environment design    Thinking through nginx/gunicorn/Docker      ~8,000
+Code implementation   app.py + requirements.txt                   ~6,000
+Config files          nginx.conf + systemd + Dockerfile           ~8,000
+Debugging             Dependency conflicts, version mismatches,   ~20,000
+                      port collisions, etc.
+Deployment            Step confirmation, troubleshooting          ~10,000
+UI implementation     HTML/CSS/JS (frontend)                      ~15,000
+UI iteration          Back-and-forth debugging                    ~15,000
+──────────────────────────────────────────────────────────────────────────────
+Total                                                             ~82,000
+Cost (Sonnet 4.6: $3/1M tokens)                                    ~$0.25
 ```
 
 #### Unikernel
 
 ```
-フェーズ              必要コンテキスト                    トークン推計
-──────────────────────────────────────────────────────────────────
-WASMアプリ実装  app.wat（新規）+ wasm_rt.rs参照           ~6,000
-デバッグ        シリアルログ読み取り + WAT修正             ~8,000
-UI実装          eq_ui.html（フロントエンド）              ~15,000
-UI調整・修正    往復デバッグ                              ~12,000
-デプロイ        scp + rc-service restart（2コマンド）      ~1,000
-──────────────────────────────────────────────────────────────────
-合計（1本目）                                         ~42,000
-費用                                                     ~$0.13
+Phase                 Context Required                           Token Estimate
+──────────────────────────────────────────────────────────────────────────────
+WASM app impl.        app.wat (new) + wasm_rt.rs reference         ~6,000
+Debugging             Serial log reading + WAT corrections         ~8,000
+UI implementation     eq_ui.html (frontend)                       ~15,000
+UI iteration          Back-and-forth debugging                    ~12,000
+Deployment            scp + rc-service restart (2 commands)        ~1,000
+──────────────────────────────────────────────────────────────────────────────
+Total (1st app)                                                   ~42,000
+Cost                                                               ~$0.13
 
-※ プラットフォーム層（net.rs / registry.rs / main.rs）は
-  変更しないため、コンテキストに読み込む必要がほぼない
+* The platform layer (net.rs / registry.rs / main.rs) is not
+  modified, so it almost never needs to be loaded into context.
 ```
 
-### スケール時のコスト推移
+### Cost Progression at Scale
 
 ```
-アプリ本数     Flask構成（累計）    Unikernel（累計）    差（倍率）
-─────────────────────────────────────────────────────────────────
-1本目          $0.25               $0.13               0.5倍（Flask有利）
-3本目          $0.75               $0.27               2.8倍（逆転）
-10本目         $2.50               $0.55               4.5倍
-30本目         $7.50               $0.95               7.9倍
-100本目        $25.00              $2.50               10倍
-──────────────────────────────────────────────────────────────────
-* Unikernelは本数が増えるほど1本あたりのコストが下がる
-  （コンポーネントがレジストリに蓄積し再利用されるため）
-* Flaskは毎回同じ推論を繰り返す。コストは線形増加。
+Apps built     Flask (cumulative)    Unikernel (cumulative)    Ratio
+─────────────────────────────────────────────────────────────────────
+1st            $0.25                 $0.13                     0.5x (Flask ahead)
+3rd            $0.75                 $0.27                     2.8x (crossover)
+10th           $2.50                 $0.55                     4.5x
+30th           $7.50                 $0.95                     7.9x
+100th          $25.00                $2.50                     10x
+──────────────────────────────────────────────────────────────────────
+* For Unikernel, per-app cost decreases as more apps are built
+  (components accumulate in the registry and get reused)
+* Flask repeats the same reasoning every time. Cost grows linearly.
 ```
 
-### なぜFlaskのコストは下がらないか
+### Why Flask Costs Never Decrease
 
 ```
-Flask Session 1: 「nginxのproxy_pass設定を書いて」→ 推論 → $0.005消費
-Flask Session 2: 「nginxのproxy_pass設定を書いて」→ 推論 → $0.005消費
-Flask Session N: 「nginxのproxy_pass設定を書いて」→ 推論 → $0.005消費
+Flask Session 1: "Write the nginx proxy_pass config" → reasoning → $0.005 spent
+Flask Session 2: "Write the nginx proxy_pass config" → reasoning → $0.005 spent
+Flask Session N: "Write the nginx proxy_pass config" → reasoning → $0.005 spent
 
-AIはセッションをまたいで記憶しない。
-インフラ設定は「人間の記憶」を前提に設計されている。
-人間は一度学べば再利用できる。AIはできない。
+AI has no memory across sessions.
+Infrastructure configuration is designed assuming human memory.
+Humans can learn once and reuse that knowledge. AI cannot.
 ```
 
-Unikernelはこの問題を設計で解決する：
+Unikernel solves this problem through design:
 
 ```
-Unikernel 1本目: プラットフォームを「作る」   → 高コスト（投資）
-Unikernel 2本目: プラットフォームを「再利用」 → WASMだけ書けばいい
-Unikernel N本目: コンポーネントも「再利用」   → 差分だけ書けばいい
+Unikernel 1st app: "Build" the platform  → High cost (investment)
+Unikernel 2nd app: "Reuse" the platform  → Only need to write the WASM
+Unikernel Nth app: "Reuse" components    → Only write the diff
 ```
 
 ---
 
-## 4. 物理資源の比較
+## 4. Physical Resource Comparison
 
-### メモリ使用量（実測・推計）
+### Memory Usage (Measured / Estimated)
 
-#### Flask構成（起動時RSS）
-
-```
-プロセス                       RSS
-────────────────────────────────────────
-Linux カーネル（最小）         ~100MB
-systemd + 基本デーモン群        ~80MB
-Docker デーモン                ~100MB
-nginx（master + worker×2）     ~15MB
-gunicorn（master + worker×2）  ~50MB
-Python インタプリタ             ~30MB
-Flask + 依存ライブラリ群        ~45MB
-app.py ロジック                  ~5MB
-────────────────────────────────────────
-合計                           ~425MB
-
-アプリ本体が使うメモリ:          ~5MB
-オーバーヘッド率:               98.8%
-```
-
-#### Unikernel（実測・KVMゲスト）
+#### Flask configuration (RSS at startup)
 
 ```
-コンポーネント                  RSS
+Process                              RSS
 ────────────────────────────────────────
-unikernel バイナリ全体          ~8MB
-  ├─ Rustコード（net/registry）  ~1.7MB
-  ├─ wasmi WASMランタイム        ~3.0MB
-  ├─ smoltcp ネットワークスタック ~1.0MB
-  ├─ WASMモジュール（app+bbs）   ~2KB
-  ├─ 静的HTMLファイル×2          ~11KB
-  └─ JMAデータバッファ（最大）   ~195KB
+Linux kernel (minimal)               ~100MB
+systemd + core daemons                ~80MB
+Docker daemon                        ~100MB
+nginx (master + 2 workers)            ~15MB
+gunicorn (master + 2 workers)         ~50MB
+Python interpreter                    ~30MB
+Flask + dependency libraries          ~45MB
+app.py logic                           ~5MB
 ────────────────────────────────────────
-合計                            ~8MB
+Total                                ~425MB
 
-アプリ本体が使うメモリ:         ~200KB
-オーバーヘッド率:               97.5%（絶対値が2桁違う）
+Memory used by the application itself: ~5MB
+Overhead ratio:                       98.8%
 ```
 
-### ストレージ使用量
+#### Unikernel (measured, KVM guest)
 
-| コンポーネント | Flask構成 | Unikernel |
+```
+Component                            RSS
+────────────────────────────────────────
+unikernel binary (total)              ~8MB
+  ├─ Rust code (net/registry)         ~1.7MB
+  ├─ wasmi WASM runtime               ~3.0MB
+  ├─ smoltcp network stack            ~1.0MB
+  ├─ WASM modules (app + bbs)           ~2KB
+  ├─ static HTML files ×2              ~11KB
+  └─ JMA data buffer (max)           ~195KB
+────────────────────────────────────────
+Total                                  ~8MB
+
+Memory used by the application itself: ~200KB
+Overhead ratio: 97.5% (absolute value is two orders of magnitude smaller)
+```
+
+### Storage Usage
+
+| Component | Flask configuration | Unikernel |
 |---|---|---|
 | OS | Ubuntu ~2.5GB | Alpine ~130MB |
-| ランタイム | Python ~45MB | wasmi込み（バイナリ内） |
-| フレームワーク等 | Flask+依存 ~35MB | なし |
-| Dockerイメージ | ~400MB（使用時） | なし |
-| **アプリ本体** | **app.py ~3KB** | **app.wasm 557B** |
-| **合計** | **~3.0GB** | **~132MB** |
-| **差** | — | **23分の1** |
+| Runtime | Python ~45MB | Included in binary (wasmi) |
+| Frameworks, etc. | Flask + deps ~35MB | None |
+| Docker image | ~400MB (when in use) | None |
+| **Application itself** | **app.py ~3KB** | **app.wasm 557B** |
+| **Total** | **~3.0GB** | **~132MB** |
+| **Ratio** | — | **1/23** |
 
-### 起動時間
+### Boot Time
 
 ```
-Flask構成:
-  Ubuntu ブート          ~15秒
-  systemd サービス起動    ~5秒
-  Docker コンテナ起動     ~3秒
-  nginx 起動              ~1秒
-  gunicorn + Python起動   ~3秒
-  ──────────────────────────
-  合計（コールドスタート） ~27秒
+Flask configuration:
+  Ubuntu boot                ~15 seconds
+  systemd service startup     ~5 seconds
+  Docker container startup    ~3 seconds
+  nginx startup               ~1 second
+  gunicorn + Python startup   ~3 seconds
+  ──────────────────────────────────────
+  Total (cold start)         ~27 seconds
 
 Unikernel:
-  GRUB → カーネル         ~0.3秒
-  VirtIO-net 初期化        ~0.2秒
-  WASMモジュールロード     ~0.3秒
-  wasmi コンパイル         ~0.1秒
-  HTTP READY               ~0.9秒
-  ──────────────────────────
-  合計（コールドスタート） ~1秒
+  GRUB → kernel              ~0.3 seconds
+  VirtIO-net initialization  ~0.2 seconds
+  WASM module load           ~0.3 seconds
+  wasmi compilation          ~0.1 seconds
+  HTTP READY                 ~0.9 seconds
+  ──────────────────────────────────────
+  Total (cold start)         ~1 second
 ```
 
-**差: 27倍。** Unikernelはスケールアウトが瞬時に完了する。
+**Difference: 27x.** Scale-out with the unikernel completes instantaneously.
 
-### 定常CPU使用率（アイドル時）
+### Steady-State CPU Usage (at idle)
 
 ```
-Flask構成:
-  nginx keepalive管理      常時1〜3%
-  gunicorn worker poll     常時1〜2%
-  Python GC                断続的スパイク
-  systemd watchdog          定期実行
-  ────────────────────────
-  アイドル時CPU:           3〜8%
+Flask configuration:
+  nginx keepalive management    constant 1–3%
+  gunicorn worker polling       constant 1–2%
+  Python GC                     intermittent spikes
+  systemd watchdog              periodic execution
+  ────────────────────────────────────────────────
+  Idle CPU:                     3–8%
 
 Unikernel:
-  smoltcp ポーリング       最小限
-  それ以外:               ほぼゼロ
-  ────────────────────────
-  アイドル時CPU:          <0.5%
+  smoltcp polling               minimal
+  Everything else:              near zero
+  ────────────────────────────────────────────────
+  Idle CPU:                     <0.5%
 ```
 
 ---
 
-## 5. エネルギー消費とCO2排出
+## 5. Energy Consumption and CO2 Emissions
 
-### 1アプリ・1サーバーあたりの消費電力推計
+### Estimated Power Consumption per Application per Server
 
-#### 計算の前提
+#### Calculation assumptions
 
-- サーバー: 8コア / 32GB RAM / TDP 200W
-- 使用率によるPUE（Power Usage Effectiveness）: 1.5
-- 日本の電力CO2係数: 0.5 kg-CO2/kWh（2024年度実績）
+- Server: 8 cores / 32GB RAM / TDP 200W
+- PUE (Power Usage Effectiveness) based on utilization: 1.5
+- Japan grid CO2 intensity: 0.5 kg-CO2/kWh (FY2024 actual)
 
-#### アイドル時消費電力
+#### Idle power consumption
 
 ```
-Flask構成:
-  CPU（アイドル8%使用）   200W × 0.08 = 16W
-  RAM（425MB常駐）        DDR4: 約 3W
-  OS/デーモン I/O         約 2W
-  PUE補正                 ×1.5
-  ────────────────────────────────
-  実効消費電力:           (16+3+2) × 1.5 = 31.5W/アプリ
+Flask configuration:
+  CPU (8% idle usage)          200W × 0.08 = 16W
+  RAM (425MB resident)         DDR4: approx. 3W
+  OS/daemon I/O                approx. 2W
+  PUE adjustment               ×1.5
+  ─────────────────────────────────────────────────
+  Effective power draw:        (16+3+2) × 1.5 = 31.5W/app
 
 Unikernel:
-  CPU（アイドル0.5%使用）200W × 0.005 = 1W
-  RAM（8MB常駐）          DDR4: 約 0.05W
-  OS/デーモン I/O         なし
-  PUE補正                 ×1.5
-  ────────────────────────────────
-  実効消費電力:           (1+0.05) × 1.5 = 1.6W/アプリ
+  CPU (0.5% idle usage)        200W × 0.005 = 1W
+  RAM (8MB resident)           DDR4: approx. 0.05W
+  OS/daemon I/O                none
+  PUE adjustment               ×1.5
+  ─────────────────────────────────────────────────
+  Effective power draw:        (1+0.05) × 1.5 = 1.6W/app
 ```
 
-**差: 約20倍（アイドル時）**
+**Difference: ~20x (at idle)**
 
-#### 年間電力消費・CO2（1アプリ）
+#### Annual electricity consumption and CO2 (1 application)
 
-| | Flask構成 | Unikernel | 削減量 |
+| | Flask configuration | Unikernel | Reduction |
 |---|---|---|---|
-| 年間電力 | 276kWh | 14kWh | 262kWh |
-| CO2換算 | 138kg-CO2 | 7kg-CO2 | 131kg-CO2 |
-| 電気代（25円/kWh） | 6,900円 | 350円 | 6,550円 |
+| Annual electricity | 276 kWh | 14 kWh | 262 kWh |
+| CO2 equivalent | 138 kg-CO2 | 7 kg-CO2 | 131 kg-CO2 |
+| Electricity cost (¥25/kWh) | ¥6,900 | ¥350 | ¥6,550 |
 
-#### 1000アプリ運用時（年間）
+#### 1,000 applications in production (annual)
 
 ```
-Flask構成:
-  必要サーバー台数: 1000アプリ × 425MB ÷ 128GB = 約4台
-  年間電力:         4台 × 200W × 8760h × 1.5 = 10,512kWh
-  CO2排出:          5,256kg-CO2 ≒ 5.3トン
+Flask configuration:
+  Servers needed: 1,000 apps × 425MB ÷ 128GB = ~4 servers
+  Annual electricity: 4 servers × 200W × 8,760h × 1.5 = 10,512 kWh
+  CO2 emissions: 5,256 kg-CO2 ≈ 5.3 tonnes
 
 Unikernel:
-  必要サーバー台数: 1000アプリ × 8MB ÷ 128GB = 1台以下
-  年間電力:         1台 × 200W × 8760h × 1.5 = 2,628kWh
-  CO2排出:          1,314kg-CO2 ≒ 1.3トン
+  Servers needed: 1,000 apps × 8MB ÷ 128GB = less than 1 server
+  Annual electricity: 1 server × 200W × 8,760h × 1.5 = 2,628 kWh
+  CO2 emissions: 1,314 kg-CO2 ≈ 1.3 tonnes
 
-削減:              7,884kWh/年、約4.0トン-CO2/年
+Reduction: 7,884 kWh/year, approximately 4.0 tonnes-CO2/year
 ```
 
-#### AIによるエネルギー消費増加との対比
+#### Comparison with AI-driven energy growth
 
 ```
-2025年時点での推計（IEA参照）:
-  データセンター全体のAI関連消費: 年間200TWh超
-  年間増加率: 30〜40%
+Estimates as of 2025 (IEA reference):
+  AI-related data center consumption: over 200 TWh/year
+  Annual growth rate: 30–40%
 
-もし世界のWebアプリの10%がUnikernel化された場合:
-  削減ポテンシャル: 〜数十TWh/年（推計）
+If 10% of the world's web applications were unikernelized:
+  Reduction potential: ~tens of TWh/year (estimated)
 
-「AIが増やすエネルギー」を「AIが最適化した実行環境」で減らす
-= このプロジェクトが目指す相殺モデル
+"Reduce the energy AI increases by using execution environments AI has optimized"
+= The offset model this project aims for
 ```
 
 ---
 
-## 6. セキュリティ攻撃面の比較
+## 6. Security Attack Surface Comparison
 
-### 攻撃面（Attack Surface）の構造
+### Structure of the Attack Surface
 
-#### Flask構成
+#### Flask configuration
 
 ```
-攻撃可能なレイヤー:
-  Ubuntu Linux カーネル   CVE 年間数百件
-  systemd               特権エスカレーション経路
-  Docker デーモン        コンテナブレイクアウト既知リスク
-  nginx                 設定ミス・バッファオーバーフロー
-  Python インタプリタ    pickle/eval/import injection
-  Flask + 依存ライブラリ Jinja2 SSTI, CORS設定ミス等
-  pip パッケージ         サプライチェーン攻撃（typosquatting）
-  SSH（管理用）          ブルートフォース・鍵漏洩
+Attackable layers:
+  Ubuntu Linux kernel    Hundreds of CVEs per year
+  systemd                Privilege escalation pathways
+  Docker daemon          Known container breakout risks
+  nginx                  Misconfiguration, buffer overflows
+  Python interpreter     pickle/eval/import injection
+  Flask + dependencies   Jinja2 SSTI, CORS misconfiguration, etc.
+  pip packages           Supply chain attacks (typosquatting)
+  SSH (management)       Brute-force, key leakage
 ```
 
 #### Unikernel
 
 ```
-攻撃可能なレイヤー:
-  smoltcp（ネットワークスタック）  限定的（no_std Rust、パニックしない）
-  wasmi（WASMランタイム）          WASM サンドボックス内で実行
-  app.wasm（アプリ）              ファイルシステムなし・シェルなし
+Attackable layers:
+  smoltcp (network stack)    Limited (no_std Rust, no panics)
+  wasmi (WASM runtime)       Executes within the WASM sandbox
+  app.wasm (application)     No filesystem, no shell
 
-攻撃できないもの:
-  シェル（存在しない）
-  ファイルシステム（存在しない）
-  他プロセス（存在しない）
-  ルート権限（概念がない）
-  パッケージマネージャー（存在しない）
+What cannot be attacked:
+  Shell (does not exist)
+  Filesystem (does not exist)
+  Other processes (do not exist)
+  Root privileges (concept does not exist)
+  Package manager (does not exist)
 ```
 
-### CVE露出数の推計
+### Estimated CVE Exposure Count
 
 ```
-Flask構成の主要コンポーネントのCVE（2020〜2025年 NVD参照）:
-  Linux カーネル:        >800件
-  Python:               >150件
-  nginx:                >50件
-  Flask + Werkzeug:     >30件
-  requests ライブラリ:  >10件
-  Docker:               >100件
-  ───────────────────────────
-  合計露出CVE:          >1,100件（重複除く推計）
+CVEs in Flask configuration's key components (2020–2025, NVD reference):
+  Linux kernel:           >800
+  Python:                 >150
+  nginx:                  >50
+  Flask + Werkzeug:       >30
+  requests library:       >10
+  Docker:                 >100
+  ───────────────────────────────────────────────
+  Total CVE exposure:     >1,100 (estimated, deduplicated)
 
 Unikernel:
-  smoltcp:              <5件（2020〜2025年）
-  wasmi:                <3件
-  Rust標準ライブラリ:   <10件（no_stdはさらに少ない）
-  ───────────────────────────
-  合計露出CVE:          <20件
+  smoltcp:                <5 (2020–2025)
+  wasmi:                  <3
+  Rust standard library:  <10 (no_std has even fewer)
+  ───────────────────────────────────────────────
+  Total CVE exposure:     <20
 ```
 
-**差: 55倍以上**
+**Difference: 55x or more**
 
-### インシデント発生時の影響範囲
+### Impact Scope in the Event of an Incident
 
 ```
-Flask構成でリモートコード実行が発生した場合:
-  - OS全体にアクセス可能
-  - 同一ホストの他アプリに横展開可能
-  - ファイルシステム全体が読み取り可能
-  - シークレット（環境変数）が漏洩
+If remote code execution occurs in the Flask configuration:
+  - Full access to the OS
+  - Lateral movement to other applications on the same host
+  - Entire filesystem readable
+  - Secrets (environment variables) leaked
 
-Unikernelで最悪のケース:
-  - WASMサンドボックス内のメモリのみアクセス可能
-  - ファイルシステムなし（漏洩する「ファイル」がない）
-  - シェルなし（コマンド実行不可）
-  - 他プロセスなし（横展開先がない）
-  - KVMゲスト境界でホストから分離されている
+Worst case in the Unikernel:
+  - Only memory within the WASM sandbox is accessible
+  - No filesystem (no "files" to leak)
+  - No shell (command execution is impossible)
+  - No other processes (no lateral movement targets)
+  - Isolated from the host by the KVM guest boundary
 ```
 
 ---
 
-## 7. レイテンシ・パフォーマンス
+## 7. Latency and Performance
 
-### レスポンスタイム（同一ネットワーク内計測）
-
-```
-エンドポイント: GET /api/quake（JSONデータ約10KB）
-
-Flask構成（推計・標準的構成）:
-  nginx受信             ~0.2ms
-  gunicorn転送          ~0.5ms
-  Python処理            ~2.0ms
-  requests.get（p2pquake API）  外部通信（除外）
-  Flask jsonify         ~1.0ms
-  nginx送信             ~0.3ms
-  ─────────────────────────────
-  内部処理レイテンシ:   ~4ms
-
-Unikernel（実測）:
-  smoltcp受信           ~0.05ms
-  WASMルーター          ~0.1ms
-  get_feed（キャッシュから）~0.1ms
-  smoltcp送信           ~0.05ms
-  ─────────────────────────────
-  内部処理レイテンシ:   ~0.3ms
-```
-
-**差: 約13倍**
-
-### スループット（理論値）
+### Response Time (measured on the same network)
 
 ```
-Flask構成（gunicorn worker×2、デフォルト設定）:
-  同時接続上限:  2〜4リクエスト（ブロッキングI/O）
-  スループット:  〜100 req/sec（静的コンテンツ）
+Endpoint: GET /api/quake (JSON data ~10KB)
 
-Unikernel（smoltcp、シングルスレッド）:
-  設計上の特性: イベントループ駆動、コンテキストスイッチなし
-  スループット: 〜1,000 req/sec（推計・単純HTTPの場合）
-  ※ 本プロジェクトは高スループットを目標としていない
+Flask configuration (estimated, standard setup):
+  nginx receive                      ~0.2ms
+  gunicorn handoff                   ~0.5ms
+  Python processing                  ~2.0ms
+  requests.get (p2pquake API)        external (excluded)
+  Flask jsonify                      ~1.0ms
+  nginx send                         ~0.3ms
+  ────────────────────────────────────────
+  Internal processing latency:       ~4ms
+
+Unikernel (measured):
+  smoltcp receive                    ~0.05ms
+  WASM router                        ~0.1ms
+  get_feed (from cache)              ~0.1ms
+  smoltcp send                       ~0.05ms
+  ────────────────────────────────────────
+  Internal processing latency:       ~0.3ms
 ```
 
-### コールドスタート後の最初のリクエスト
+**Difference: ~13x**
+
+### Throughput (theoretical)
 
 ```
-Flask構成:
-  起動: ~27秒
-  Python import完了後: 追加 ~2秒（モジュールキャッシュウォームアップ）
-  最初のリクエスト処理可能まで: ~29秒
+Flask configuration (gunicorn with 2 workers, default settings):
+  Max concurrent connections: 2–4 requests (blocking I/O)
+  Throughput: ~100 req/sec (static content)
+
+Unikernel (smoltcp, single-threaded):
+  Design characteristics: event-loop driven, no context switches
+  Throughput: ~1,000 req/sec (estimated, for simple HTTP)
+  * High throughput is not a goal of this project
+```
+
+### First Request After Cold Start
+
+```
+Flask configuration:
+  Startup: ~27 seconds
+  After Python import completes: additional ~2 seconds (module cache warmup)
+  Time until first request can be served: ~29 seconds
 
 Unikernel:
-  起動: ~1秒
-  最初のリクエスト処理可能まで: ~1秒
+  Startup: ~1 second
+  Time until first request can be served: ~1 second
 
-差: 29倍
+Difference: 29x
 ```
 
-これは**オートスケール時に決定的な差**になる。需要急増時、Flask構成は29秒間リクエストを処理できない。
+This creates a **decisive difference during auto-scaling**. When demand spikes, the Flask configuration cannot serve requests for 29 seconds.
 
 ---
 
-## 8. スケーラビリティ
+## 8. Scalability
 
-### 水平スケール（インスタンス追加）
+### Horizontal Scaling (Adding Instances)
 
-#### Flask構成
-
-```
-1. サーバーを追加（~5分）
-2. Dockerイメージをプル（~2分・3GBイメージ）
-3. nginx設定を更新（upstream追加）
-4. gunicorn起動 + warmup（~2分）
-5. ロードバランサー登録
-─────────────────────────────
-スケールアウト所要時間: ~10〜15分
-自動化難易度: 高（設定ファイル変更が必要）
-```
-
-#### Unikernel
+#### Flask configuration
 
 ```
-1. KVMゲストを複製（~30秒・1.7MBバイナリ）
-2. 起動（~1秒）
-3. smoltcpがDHCPでIPを取得（~0.5秒）
-─────────────────────────────
-スケールアウト所要時間: ~2分
-自動化難易度: 低（バイナリコピーと起動のみ）
-```
-
-### 垂直スケール（リソース増強）の必要性
-
-```
-Flask構成:
-  メモリ使用量が多いため、早期にメモリ不足に直面
-  1サーバー(32GB RAM)での最大アプリ数: ~75本
-
-Unikernel:
-  1サーバー(32GB RAM)での最大アプリ数: ~4,000本
-  ほぼ垂直スケールが不要
-```
-
----
-
-## 9. 運用・デプロイサイクル
-
-### アプリ変更のデプロイ手順
-
-#### Flask構成
-
-```
-1. コード修正 → git push
-2. CI/CDパイプライン起動
-3. Dockerイメージビルド（~3〜5分）
-4. イメージをレジストリにプッシュ（~2分）
-5. 本番サーバーでイメージプル（~2分）
-6. コンテナ再起動（ダウンタイムあり or ローリング更新設定）
-7. nginx設定更新（場合による）
-8. 動作確認
-─────────────────────────────
-所要時間: 10〜20分（CI/CD整備済みの場合）
-ダウンタイム: 設定次第（数秒〜数分）
-必要なインフラ知識: CI/CD / Docker / nginx / Linux
-```
-
-#### Unikernel
-
-```
-1. WASMを修正 → コンパイル（wat2wasm、~0.1秒）
-2. Alpine にscp（~1秒、1KBのバイナリ）
-3. unikernel再起動（rc-service restart、~1秒）
-─────────────────────────────
-所要時間: ~5秒
-ダウンタイム: ~1秒（起動時間のみ）
-必要なインフラ知識: sshコマンドのみ
-```
-
-**AIにとっての意味**: AIはデプロイに「何を知っているか」ではなく「コマンド2行」で済む。毎回デプロイ手順を覚え直す必要がない。
-
-### 変更の種類別コスト
-
-```
-変更の種類       Flask構成        Unikernel
+1. Add server (~5 minutes)
+2. Pull Docker image (~2 minutes, 3GB image)
+3. Update nginx config (add upstream)
+4. Start gunicorn + warmup (~2 minutes)
+5. Register with load balancer
 ─────────────────────────────────────────
-APIロジック修正  10〜20分         5秒
-UIデザイン変更   10〜20分         5秒
-設定変更         15〜30分+再起動  Alpine設定変更 ~1分
-依存ライブラリ追加 20〜40分       WASMで完結・追加なし
-セキュリティパッチ ~1時間         対象なし（依存関係がない）
+Scale-out time: ~10–15 minutes
+Automation difficulty: High (requires configuration file changes)
+```
+
+#### Unikernel
+
+```
+1. Clone KVM guest (~30 seconds, 1.7MB binary)
+2. Boot (~1 second)
+3. smoltcp obtains IP via DHCP (~0.5 seconds)
+─────────────────────────────────────────
+Scale-out time: ~2 minutes
+Automation difficulty: Low (just copy binary and start)
+```
+
+### Need for Vertical Scaling (Resource Increases)
+
+```
+Flask configuration:
+  High memory footprint means running out of memory early
+  Max apps on 1 server (32GB RAM): ~75
+
+Unikernel:
+  Max apps on 1 server (32GB RAM): ~4,000
+  Vertical scaling is almost never needed
 ```
 
 ---
 
-## 10. 依存関係・脆弱性露出面
+## 9. Operations and Deployment Cycle
 
-### 依存ツリーの比較
+### Deployment Procedure for Application Changes
 
-#### Flask構成の直接・間接依存関係
+#### Flask configuration
+
+```
+1. Modify code → git push
+2. CI/CD pipeline triggered
+3. Build Docker image (~3–5 minutes)
+4. Push image to registry (~2 minutes)
+5. Pull image on production server (~2 minutes)
+6. Restart container (with downtime, or rolling update if configured)
+7. Update nginx config (if needed)
+8. Verify behavior
+─────────────────────────────────────────
+Time required: 10–20 minutes (with CI/CD in place)
+Downtime: Depends on configuration (seconds to minutes)
+Infrastructure knowledge required: CI/CD / Docker / nginx / Linux
+```
+
+#### Unikernel
+
+```
+1. Modify WASM → compile (wat2wasm, ~0.1 seconds)
+2. scp to Alpine (~1 second, 1KB binary)
+3. Restart unikernel (rc-service restart, ~1 second)
+─────────────────────────────────────────
+Time required: ~5 seconds
+Downtime: ~1 second (boot time only)
+Infrastructure knowledge required: Only the ssh command
+```
+
+**What this means for AI**: AI can deploy with "two commands" rather than needing to know what configuration to apply. There is no need to recall the deployment procedure every time.
+
+### Cost by Type of Change
+
+```
+Type of change         Flask configuration     Unikernel
+──────────────────────────────────────────────────────────
+API logic fix          10–20 minutes           5 seconds
+UI design change       10–20 minutes           5 seconds
+Configuration change   15–30 minutes + restart Alpine config change ~1 minute
+Add dependency         20–40 minutes           Contained in WASM, no addition needed
+Security patch         ~1 hour                 N/A (no dependencies)
+```
+
+---
+
+## 10. Dependencies and Vulnerability Exposure
+
+### Dependency Tree Comparison
+
+#### Flask configuration's direct and indirect dependencies
 
 ```
 Flask
-  ├─ Werkzeug（~50の間接依存）
-  ├─ Jinja2（~10の間接依存）
-  ├─ click（~5の間接依存）
+  ├─ Werkzeug (~50 indirect dependencies)
+  ├─ Jinja2 (~10 indirect dependencies)
+  ├─ click (~5 indirect dependencies)
   └─ itsdangerous
 requests
-  ├─ urllib3（~5の間接依存）
+  ├─ urllib3 (~5 indirect dependencies)
   ├─ certifi
   ├─ charset-normalizer
   └─ idna
 
-合計: ~80〜100パッケージ
+Total: ~80–100 packages
 ```
 
-さらにUbuntu/Dockerの依存関係を含めると数千パッケージ。
-**サプライチェーン攻撃の露出面**: 数千パッケージのうち1つが侵害されれば全体が危険にさらされる。
+Including Ubuntu and Docker dependencies: thousands of packages.
+**Supply chain attack surface**: If any one of thousands of packages is compromised, the entire system is at risk.
 
-#### Unikernel（app.wasm）の依存関係
+#### Unikernel (app.wasm) dependencies
 
 ```
-app.wasm（直接）:
-  - host.get_feed()  ← unikernelカーネルが提供
-  - host.log()       ← unikernelカーネルが提供
-  それ以外: なし
+app.wasm (direct):
+  - host.get_feed()  ← provided by the unikernel kernel
+  - host.log()       ← provided by the unikernel kernel
+  Everything else: none
 
-合計: 0パッケージ（外部依存なし）
+Total: 0 packages (no external dependencies)
 ```
 
-unikernelカーネル自体の依存:
+The unikernel kernel itself depends on:
 ```
 smoltcp, wasmi, linked_list_allocator, uart_16550
-合計: ~10クレート（すべてno_std、監査済み）
+Total: ~10 crates (all no_std, audited)
 ```
 
-### アップデート負荷
+### Update Burden
 
 ```
-Flask構成:
-  毎週: pip audit で脆弱性チェック
-  毎月: 依存ライブラリのアップデート・テスト
-  毎四半期: Ubuntu LTSアップデート
-  随時: 緊急セキュリティパッチ
-  年間工数: エンジニア ~2週間相当
+Flask configuration:
+  Weekly: pip audit for vulnerability scanning
+  Monthly: dependency updates and testing
+  Quarterly: Ubuntu LTS updates
+  As needed: Emergency security patches
+  Annual labor: ~2 engineer-weeks
 
 Unikernel:
-  プラットフォーム（smoltcp等）: 年1〜2回の意図的アップデートのみ
-  app.wasm: 依存ライブラリなし・アップデート不要
-  年間工数: ほぼゼロ
+  Platform (smoltcp, etc.): Only 1–2 intentional updates per year
+  app.wasm: No dependencies, no updates needed
+  Annual labor: Near zero
 ```
 
 ---
 
-## 11. 再利用性とレジストリ効果
+## 11. Reusability and Registry Effects
 
-### コンポーネントレジストリの構造
+### Component Registry Structure
 
-Unikernelのコンポーネントは「一度作れば何度でも再利用」できる設計になっている。
+Unikernel components are designed to be built once and reused indefinitely.
 
 ```
-プラットフォーム層（完全共有）:
-  ブート・ページング・メモリ管理  ← 全アプリで共有（変更しない）
-  VirtIO-net / smoltcp           ← 全アプリで共有（変更しない）
-  wasmi WASMランタイム            ← 全アプリで共有（変更しない）
+Platform layer (fully shared):
+  Boot, paging, memory management  ← Shared across all apps (never changes)
+  VirtIO-net / smoltcp             ← Shared across all apps (never changes)
+  wasmi WASM runtime               ← Shared across all apps (never changes)
 
-コンポーネント層（再利用可能）:
-  HTTPルーター・ヘッダーパーサー  ← 複数アプリで共有
-  JSONシリアライザー              ← 複数アプリで共有
-  JWT認証ロジック                 ← 認証が必要なアプリで共有
-  ── これらがレジストリに蓄積される ──
+Component layer (reusable):
+  HTTP router, header parser        ← Shared across multiple apps
+  JSON serializer                   ← Shared across multiple apps
+  JWT authentication logic          ← Shared across apps requiring auth
+  ── These accumulate in the registry ──
 
-アプリケーション層（アプリ固有）:
-  app.wasm（557B）               ← このアプリだけのロジック
+Application layer (app-specific):
+  app.wasm (557B)                   ← Logic unique to this application
 ```
 
-### 重要な注記：実証済みと設計上の予測の区別
+### Important Note: Distinguishing Proven Results from Design Predictions
 
-| 項目 | 状態 |
+| Item | Status |
 |---|---|
-| プラットフォーム層の再利用（smoltcp・wasmi等） | ✅ 実証済み |
-| デプロイコストの削減（scp 2コマンド） | ✅ 実証済み |
-| コンポーネントレジストリによるコスト逓減 | 🔮 設計上の予測（未実装） |
-| 複数アプリ間でのWASM共有 | 🔮 設計上の予測（未実装） |
+| Platform layer reuse (smoltcp, wasmi, etc.) | Proven |
+| Deployment cost reduction (scp, 2 commands) | Proven |
+| Cost reduction through component registry | Design prediction (not yet implemented) |
+| WASM sharing across multiple applications | Design prediction (not yet implemented) |
 
-現時点で実証済みなのは「プラットフォーム層を変更しない = 毎回読まなくていい」という点。
-コンポーネントレジストリによる逓減は設計上の目標であり、実装・実測はこれから。
+What has been proven at this point is that "the platform layer does not change = it almost never needs to be read." Cost reduction via a component registry is a design goal; implementation and measurement are still ahead.
 
-### レジストリ効果によるコスト削減（推計）
+### Cost Reduction from Registry Effects (Estimated)
 
 ```
-アプリ本数が増えるにつれてコンポーネントが蓄積される効果:
+Effect of component accumulation as more apps are built:
 
-n本目のアプリ開発コスト（Unikernel）:
-  = 新規ロジック分のトークン
-  + max(0, 必要コンポーネント - レジストリ既存分) × コンポーネント開発コスト
+Cost to develop the Nth app (Unikernel):
+  = Tokens for new logic
+  + max(0, required components - existing in registry) × component development cost
 
-1本目: $0.13（プラットフォーム投資込み）
-10本目: $0.06（HTTPルーター等は再利用）
-50本目: $0.02〜$0.03（ほとんどのコンポーネントが既存）
-100本目: $0.01〜$0.02（差分だけを書く）
+1st app:   $0.13 (including platform investment)
+10th app:  $0.06 (HTTP router etc. reused)
+50th app:  $0.02–$0.03 (most components already exist)
+100th app: $0.01–$0.02 (write only the diff)
 
-Flask構成は常に $0.25（毎回ゼロから推論）
+Flask configuration is always $0.25 (reasons from scratch every time)
 ```
 
 ---
 
-## 12. 総合比較表
+## 12. Comprehensive Comparison Table
 
-| 指標 | Flask構成 | Unikernel | 差（倍） |
+| Metric | Flask configuration | Unikernel | Ratio |
 |---|---|---|---|
-| **メモリ（起動時）** | ~425MB | ~8MB | **53倍** |
-| **ストレージ合計** | ~3.0GB | ~132MB | **23倍** |
-| **コールドスタート** | ~27秒 | ~1秒 | **27倍** |
-| **定常CPU** | 3〜8% | <0.5% | **6〜16倍** |
-| **内部レイテンシ** | ~4ms | ~0.3ms | **13倍** |
-| **アイドル消費電力** | ~31.5W | ~1.6W | **20倍** |
-| **年間電力（1アプリ）** | ~276kWh | ~14kWh | **20倍** |
-| **年間CO2（1アプリ）** | ~138kg | ~7kg | **20倍** |
-| **CVE露出数** | >1,100件 | <20件 | **55倍** |
-| **外部依存パッケージ** | ~100個 | 0個 | **∞** |
-| **デプロイ時間** | 10〜20分 | ~5秒 | **120〜240倍** |
-| **スケールアウト時間** | 10〜15分 | ~2分 | **5〜7倍** |
-| **1サーバー最大アプリ数** | ~75本 | ~4,000本 | **53倍** |
-| **AIコスト（1本目）** | ~$0.25 | ~$0.13 | **0.5倍（Flask有利）** |
-| **AIコスト（10本目）** | ~$2.50 | ~$0.55 | **4.5倍（Unikernel有利）** |
-| **AIコスト（100本目）** | ~$25.00 | ~$2.50 | **10倍（Unikernel有利）** |
-| **アプリ本体コード行数** | ~80行(Python) | ~65行(WAT) | **同等** |
+| **Memory (at startup)** | ~425MB | ~8MB | **53x** |
+| **Total storage** | ~3.0GB | ~132MB | **23x** |
+| **Cold start time** | ~27s | ~1s | **27x** |
+| **Steady-state CPU** | 3–8% | <0.5% | **6–16x** |
+| **Internal latency** | ~4ms | ~0.3ms | **13x** |
+| **Idle power draw** | ~31.5W | ~1.6W | **20x** |
+| **Annual electricity (1 app)** | ~276 kWh | ~14 kWh | **20x** |
+| **Annual CO2 (1 app)** | ~138 kg | ~7 kg | **20x** |
+| **CVE exposure count** | >1,100 | <20 | **55x** |
+| **External dependency packages** | ~100 | 0 | **∞** |
+| **Deployment time** | 10–20 min | ~5 sec | **120–240x** |
+| **Scale-out time** | 10–15 min | ~2 min | **5–7x** |
+| **Max apps per server** | ~75 | ~4,000 | **53x** |
+| **AI cost (1st app)** | ~$0.25 | ~$0.13 | **0.5x (Flask ahead)** |
+| **AI cost (10th app)** | ~$2.50 | ~$0.55 | **4.5x (Unikernel ahead)** |
+| **AI cost (100th app)** | ~$25.00 | ~$2.50 | **10x (Unikernel ahead)** |
+| **Application code size** | ~80 lines (Python) | ~65 lines (WAT) | **Comparable** |
 
 ---
 
-## 13. スケール試算（1000アプリ）
+## 13. Scale Estimation (1,000 Applications)
 
-### 物理インフラ
+### Physical Infrastructure
 
 ```
-Flask構成:
-  必要メモリ: 1000 × 425MB = 425GB
-  必要サーバー（128GB RAM）: 4台
-  ストレージ: 1000 × 3GB = 3TB
+Flask configuration:
+  Memory required: 1,000 × 425MB = 425GB
+  Servers needed (128GB RAM): 4 servers
+  Storage: 1,000 × 3GB = 3TB
 
 Unikernel:
-  必要メモリ: 1000 × 8MB = 8GB
-  必要サーバー（128GB RAM）: 1台
-  ストレージ: 1000 × 132MB = 132GB
+  Memory required: 1,000 × 8MB = 8GB
+  Servers needed (128GB RAM): 1 server
+  Storage: 1,000 × 132MB = 132GB
 ```
 
-### 年間コスト試算
+### Annual Cost Estimate
 
 ```
-                    Flask構成      Unikernel     削減額
-─────────────────────────────────────────────────────
-サーバー費用        4台×60万円    1台×60万円    180万円/年
-電力コスト         10,512kWh      2,628kWh      19,800円/年
-AIコーディング     $25,000/年     $2,500/年      $22,500/年
-セキュリティ対応   エンジニア2週  ほぼゼロ       〜100万円/年
-─────────────────────────────────────────────────────
-合計削減:                                       〜500万円/年
-CO2削減:                                        約4トン/年
+                        Flask configuration    Unikernel     Savings
+──────────────────────────────────────────────────────────────────────
+Server costs            4 × ¥600K            1 × ¥600K     ¥1.8M/year
+Electricity             10,512 kWh           2,628 kWh     ¥19,800/year
+AI coding               $25,000/year         $2,500/year   $22,500/year
+Security maintenance    2 engineer-weeks     Near zero     ~¥1M/year
+──────────────────────────────────────────────────────────────────────
+Total savings:                                              ~¥5M/year
+CO2 reduction:                                              ~4 tonnes/year
 ```
 
-### AIコーディング投資回収ポイント
+### AI Coding Break-Even Point
 
 ```
-Flask構成: アプリ1本目から $0.25（変化なし）
+Flask configuration: $0.25 from the very first app (no change)
 Unikernel:
-  1本目: $0.13（プラットフォーム込み）
-  累計3本目時点で Flask 構成より総コストが低くなる
-  100本目時点では 10倍の開きがある
+  1st app: $0.13 (including platform investment)
+  By the 3rd app, cumulative cost is already lower than Flask
+  By the 100th app, the gap is 10x
 ```
 
 ---
 
-## 14. この設計が成立する条件
+## 14. Conditions for This Design to Work
 
-伝統的スタックに対してUnikernel + AI-Nativeが優位になる条件：
+Conditions under which Unikernel + AI-Native outperforms the traditional stack:
 
 ```
-条件1: AIがコードを書く
-  → 人間がno_std Rustを書くのは難しすぎる。AIなら書ける。
-  → 2024年以降、LLMの能力でこの壁が越えられた。
+Condition 1: AI writes the code
+  → Writing no_std Rust is too hard for humans. AI can do it.
+  → Since 2024, LLM capability has cleared this hurdle.
 
-条件2: コンポーネントレジストリが存在する
-  → プラットフォーム層の再利用でコスト逓減が起きる。
-  → レジストリがないと毎回ゼロからで優位性が薄れる。
+Condition 2: A component registry exists
+  → Platform layer reuse drives decreasing marginal cost.
+  → Without a registry, starting from scratch every time weakens the advantage.
 
-条件3: デプロイがコード化されている
-  → AIが自律的に「作る→テスト→デプロイ」できる。
-  → 本プロジェクトでは scp + rc-service restart の2コマンド。
+Condition 3: Deployment is codified
+  → AI can autonomously "build → test → deploy".
+  → In this project: scp + rc-service restart — 2 commands.
 
-条件4: ログがAI可読である
-  → シリアル出力 → AIが読んで自己修正できる。
-  → 本プロジェクト実証済み。自律修正ループが次フェーズ。
+Condition 4: Logs are AI-readable
+  → Serial output → AI reads it and self-corrects.
+  → Proven in this project. The autonomous correction loop is the next phase.
 ```
 
-**2026年時点で条件1〜3は本プロジェクトで実証済み。**
+**As of 2026, conditions 1–3 have been demonstrated in this project.**
 
 ---
 
-## 15. なぜこの問いが今まで立てられなかったか
+## 15. Why This Question Was Never Asked Before
 
-### エンジニアによる構造的な視野の制約
-
-```
-1. 職業的資産の問題
-   Python/Linux/Dockerが自分のスキルセット・市場価値の源泉
-   → それを否定する方向に無意識の抵抗が生まれる
-   → 「もっと良い方法があるかもしれない」という問いが立ちにくい
-
-2. エコシステムの慣性
-   「みんながFlaskを使っている」
-   「Stack Overflowに答えがある」
-   「採用でFlask経験者を確保できる」
-   → 合理的な理由に見えるが、これはAIが主体の時代には無効
-
-3. 技術的可能性の誤解
-   unikernelは2013年（MirageOS）から存在する
-   「難しすぎて実用的でない」という評価が固定された
-   → AIが書けば「難しすぎる」問題が消える
-   → この評価はAI以前の時代に形成されたもの
-
-4. 問いを立てる立場の問題
-   利害関係のある人（エンジニア）には
-   「なんでこんなに積み上げてるんだ？」という問いが立ちにくい
-   → このプロジェクトは非エンジニアの視点から生まれた
-```
-
-### 非エンジニアの視点が生んだ具体的な設計決定
-
-このプロジェクトには「知識がないことがシンプルな解に直結した」事例がある。
-
-**Alpineを「横に置く」という発想:**
+### The Structural Blind Spot of Engineers
 
 ```
-エンジニアが考えること:
-  「unikernelにファイルシステムがない」
-  → virtio-blkドライバを実装しよう
-  → 9Pファイルシステムを実装しよう
-  → Plan 9プロトコルを使おう
+1. The problem of professional assets
+   Python/Linux/Docker are the source of engineers' skills and market value.
+   → This creates unconscious resistance to questioning those choices.
+   → "Could there be a better way?" becomes a hard question to ask.
 
-このプロジェクトの答え:
-  「ファイルシステムの実装方法を知らない」
-  → Linuxをそのまま横に置けばいい
-  → Alpine + ネットワーク越しにファイルを取得
+2. Ecosystem inertia
+   "Everyone uses Flask."
+   "Stack Overflow has answers for it."
+   "We can hire people who know Flask."
+   → These look like rational reasons, but they are invalid in an AI-driven era.
+
+3. Misunderstanding of technical feasibility
+   Unikernels have existed since 2013 (MirageOS).
+   "Too difficult to be practical" became a fixed evaluation.
+   → If AI can write them, the "too difficult" problem disappears.
+   → This evaluation was formed before AI.
+
+4. The problem of who asks the question
+   Those with a stake in the status quo (engineers) find it hard
+   to ask "Why is all of this piled up?"
+   → This project was born from a non-engineer's perspective.
 ```
 
-結果として、virtio-blkドライバの実装コストを回避しつつ、
-「AlpineをBIOSと同じ位置づけにする」という設計思想とも整合した。
+### Specific Design Decisions That Came from a Non-Engineer Perspective
 
-技術的には仮想ディスクアタッチと本質的に同じ（媒体がネットワークなだけ）。
-ただし「すでにあるTCPスタックで取れる」という実用的な判断でもある。
+This project has examples where "not knowing" led directly to simpler solutions.
 
-知識の欠如が、既存の複雑な解をスキップして最もシンプルな解に直結した例。
-
-### 技術的には2013年から可能だったが普及しなかった理由
+**The idea of "placing Alpine alongside" the unikernel:**
 
 ```
-2013年: MirageOS登場（unikernel実用化）
-  → 「書けない」（OCamlで書く必要があり、専門知識が必要）
-  → 採用されなかった
+What an engineer would think:
+  "The unikernel has no filesystem."
+  → Let's implement a virtio-blk driver.
+  → Let's implement a 9P filesystem.
+  → Let's use the Plan 9 protocol.
 
-2024年: LLM（GPT-4/Claude等）が実用化
-  → AIが no_std Rust を書ける
-  → 「書けない」というボトルネックが消えた
-  → このプロジェクトが成立するタイミングになった
+This project's answer:
+  "I don't know how to implement a filesystem."
+  → Just put Linux right next to it.
+  → Alpine + fetch files over the network.
 ```
 
-### 先行研究との位置づけ
+As a result, the project avoided the cost of implementing a virtio-blk driver, while also being consistent with the design philosophy of "treating Alpine as the equivalent of BIOS."
+
+Technically, this is essentially the same as attaching a virtual disk — the medium is just the network. It is also a practical judgment: "We can use the TCP stack that's already there."
+
+A gap in knowledge skipped past the existing complex solution and went directly to the simplest one.
+
+### Why Technology Available Since 2013 Never Took Off
 
 ```
-AIOS（arxiv:2403.16971）:
-  AI主体のOS設計を論じる。ただしLinux上、コード生成なし。
+2013: MirageOS launched (unikernel made practical)
+  → "Can't write it" (required OCaml and specialized knowledge)
+  → Was not adopted
+
+2024: LLMs (GPT-4/Claude etc.) became practical
+  → AI can write no_std Rust
+  → The "can't write it" bottleneck disappeared
+  → This project becomes viable at this exact moment
+```
+
+### Position Relative to Prior Research
+
+```
+AIOS (arxiv:2403.16971):
+  Discusses AI-native OS design. But runs on Linux, no code generation.
 
 Unikraft:
-  unikernelコンポーネントレジストリを実装済み。ただし人間管理、AIなし。
+  Implements a unikernel component registry. But human-managed, no AI.
 
-UniLabOS（arxiv:2512.21766）:
-  "AI-native OS"の言葉を使う。ただし実験室制御、Linuxベース。
+UniLabOS (arxiv:2512.21766):
+  Uses the phrase "AI-native OS". But for laboratory control, Linux-based.
 
 arxiv:2601.15727:
-  LLMでカーネルコード生成。ただしGPUカーネル（CUDA）限定。
+  LLM-based kernel code generation. But limited to GPU kernels (CUDA).
 
-本プロジェクトの独自性:
-  AIOS（AI主体OS）× Unikraft（コンポーネントレジストリ）を合体させ、
-  「AIの推論コスト削減」という経済設計を加えた組み合わせ。
-  この4要素を同時に満たす先行研究は2026年3月時点で確認されていない。
+This project's originality:
+  AIOS (AI-native OS) × Unikraft (component registry), combined,
+  with an economic design centered on "reducing AI inference costs."
+  As of March 2026, no prior work satisfying all four elements simultaneously
+  has been identified.
 ```
 
 ---
 
-## 16. 利用可能性と限界の考察
+## 16. Applicability and Limitations
 
-### ネットワーク監視アプリが明らかにしたこと
+### What the Network Monitor Application Revealed
 
-本プロジェクトと並行して、同一ホスト（192.168.10.126）上でネットワーク監視アプリが稼働していることが判明した。このアプリはARPスプーフィングによる他デバイスのトラフィック計測・デバイスマップの動的表示を実現している。
+In parallel with this project, a network monitoring application was found to be running on the same host (192.168.10.126). This application uses ARP spoofing to measure traffic from other devices and dynamically display a device map.
 
-この監視アプリをunikernelで実現しようとすると、根本的な壁に当たる。
+Attempting to implement this monitoring application as a unikernel runs into a fundamental wall.
 
 ```
-ネットワーク監視に必要なもの:
-  NET_RAW権限（raw socket）
-  ARPブロードキャスト送受信
-  他デバイスのパケットキャプチャ
-  OS全体の視点（privileged）
+What network monitoring requires:
+  NET_RAW privilege (raw sockets)
+  ARP broadcast send/receive
+  Packet capture from other devices
+  An OS-level, privileged perspective
 
-unikernelが設計上持たないもの:
-  OS権限モデルそのもの
-  自分宛以外のパケットを見る手段
-  「環境を能動的に観測する」という機能
+What unikernels are not designed to have:
+  The OS privilege model itself
+  Any means to see packets not addressed to it
+  The ability to "actively observe the environment"
 ```
 
-これは「実装が足りない」のではなく、**設計思想の根本的な差異**から来ている。
+This does not come from a lack of implementation — it stems from **a fundamental difference in design philosophy**.
 
 ---
 
-### 利用可能性と限界を決める3つの軸
+### Three Axes That Determine Applicability and Limitations
 
-#### 軸1：「観測される」vs「観測する」
-
-```
-Unikernelが得意:
-  外からリクエストを受けて処理して返す = 「観測される」存在
-
-Unikernelが苦手:
-  環境を能動的に観測・計測する = 「観測する」存在
-```
-
-ネットワーク監視は「環境を観測する」ソフトウェアの典型。unikernelは「環境から隔離される」ことを目的とするため、根本的に相性が悪い。
-
-#### 軸2：「純粋関数」vs「副作用」
+#### Axis 1: "Being Observed" vs. "Observing"
 
 ```
-Unikernelに向くもの（純粋関数的）:
-  入力 → 変換 → 出力
-  環境に依存しない・副作用がない
-  例: HTTPリクエスト → JSON変換 → レスポンス
+What unikernels excel at:
+  Receive a request from outside, process it, return a response = "being observed"
 
-Unikernelに向かないもの（副作用的）:
-  環境を読む・書く・変える
-  OSレベルのリソースに依存する
-  例: パケットキャプチャ、ファイル監視、プロセス管理
+What unikernels are poor at:
+  Actively observing and measuring the environment = "observing"
 ```
 
-#### 軸3：「最小権限」vs「最大権限」
+Network monitoring is the archetypal example of software that "observes the environment." Since unikernels are designed to be isolated from the environment, they are fundamentally ill-suited for this.
+
+#### Axis 2: "Pure Functions" vs. "Side Effects"
 
 ```
-Unikernelのセキュリティ価値:
-  権限がない = 攻撃面がない（本レポート6章参照）
+What suits a unikernel (pure-function style):
+  Input → transform → output
+  Does not depend on environment, has no side effects
+  Example: HTTP request → JSON transform → response
 
-ネットワーク監視の要件:
-  privileged: true / NET_RAW / NET_ADMIN = 最大権限
+What does not suit a unikernel (side-effect style):
+  Reading, writing to, or modifying the environment
+  Depends on OS-level resources
+  Examples: packet capture, file watching, process management
+```
 
-この2つは根本的に対立する。
+#### Axis 3: "Minimum Privilege" vs. "Maximum Privilege"
+
+```
+The security value of unikernels:
+  No privileges = no attack surface (see Section 6)
+
+Requirements for network monitoring:
+  privileged: true / NET_RAW / NET_ADMIN = maximum privilege
+
+These two are fundamentally in conflict.
 ```
 
 ---
 
-### 利用可能性マトリクス
+### Applicability Matrix
 
-| アプリの種類 | 適合度 | 理由 |
+| Application type | Fit | Reason |
 |---|---|---|
-| JSON API（本プロジェクト） | ◎ | 純粋変換・環境非依存 |
-| 静的ファイル配信 | ◎ | メモリから返すだけ |
-| 認証・JWT検証 | ◎ | 純粋計算 |
-| 画像・動画変換 | ○ | 計算集約・環境非依存 |
-| Webスクレイピング | ○ | HTTPクライアントで可能 |
-| データベース | △ | 永続ストレージが必要 |
-| ファイル処理 | △ | Alpine連携で可能 |
-| ネットワーク監視 | ✗ | OS権限が必要 |
-| ハードウェア制御 | ✗ | デバイスドライバが必要 |
-| プロセス管理 | ✗ | プロセスの概念がない |
+| JSON API (this project) | Excellent | Pure transformation, environment-independent |
+| Static file serving | Excellent | Just returns from memory |
+| Auth / JWT verification | Excellent | Pure computation |
+| Image/video conversion | Good | Compute-intensive, environment-independent |
+| Web scraping | Good | Possible via HTTP client |
+| Database | Marginal | Requires persistent storage |
+| File processing | Marginal | Possible via Alpine integration |
+| Network monitoring | Not suitable | Requires OS privileges |
+| Hardware control | Not suitable | Requires device drivers |
+| Process management | Not suitable | The concept of "processes" does not exist |
 
 ---
 
-### unikernelは「アプリ」ではなく「境界」である
+### A Unikernel Is a "Boundary," Not an "Application"
 
-この考察から、unikernelの本質的な位置づけが見えてくる。
-
-```
-従来の考え方:
-  unikernel = アプリがOSなしで動く仕組み
-
-このプロジェクトが示したこと:
-  unikernel = 信頼できる実行境界
-  「外からのリクエスト」と「内部のAlpine」の間に立つ
-```
-
-ネットワーク監視アプリを例にとると、理想的な3層構造はこうなる：
+This analysis reveals the essential positioning of the unikernel.
 
 ```
-収集層（Alpine）:
-  arp-scan + ifstatでデータ収集
-  → 環境と直接接触する・特権が必要
-  → Linuxが担うべき領域
+The conventional view:
+  unikernel = a mechanism for running an app without an OS
 
-公開層（unikernel）:
-  収集されたデータをAPIとして安全に公開
-  → 純粋変換・最小権限・攻撃面ゼロ
-  → unikernelが担うべき領域
-
-表示層（ブラウザ）:
-  グラフ・パネルを描画
-  → 人間が見るもの・人間用インフラ（CDN等）を活用
-  → ブラウザが担うべき領域
+What this project has shown:
+  unikernel = a trusted execution boundary
+  Standing between "requests from outside" and "internal Alpine"
 ```
 
-この3層は、本プロジェクトの地震モニターと完全に同じ構造である。
+Taking the network monitor application as an example, the ideal three-tier structure looks like this:
+
+```
+Collection layer (Alpine):
+  Collect data with arp-scan + ifstat
+  → Directly interacts with the environment, requires privilege
+  → The domain Linux should handle
+
+Exposure layer (unikernel):
+  Safely expose collected data as an API
+  → Pure transformation, minimum privilege, zero attack surface
+  → The domain the unikernel should handle
+
+Presentation layer (browser):
+  Render graphs and panels
+  → What humans see, leverages human-oriented infrastructure (CDNs etc.)
+  → The domain the browser should handle
+```
+
+This three-tier structure is identical to that of the earthquake monitor in this project.
 
 ---
 
-### 限界の正直な整理
+### An Honest Summary of Limitations
 
-#### 本質的な限界（設計思想に起因・解決しない）
-
-```
-1. 環境を能動的に観測できない
-   → 「外から見る」のではなく「中で処理する」設計
-
-2. 状態を永続化できない
-   → ファイルシステムがない = 再起動で消える
-
-3. 特権操作ができない
-   → セキュリティとのトレードオフ（意図的）
-
-4. デバッグが難しい
-   → シリアルログのみ。AIが読む前提の設計
-```
-
-#### 暫定的な限界（実装で解決可能）
+#### Fundamental limitations (rooted in design philosophy — will not be solved)
 
 ```
-1. TLSがない  → Alpine層での終端で解決済み
-2. DNSがない  → Alpine層での解決で対応可能
-3. 単一NIC   → smoltcpの拡張で対応可能
+1. Cannot actively observe the environment
+   → Designed to "process inside" rather than "look from outside"
+
+2. Cannot persist state
+   → No filesystem = data is gone on restart
+
+3. Cannot perform privileged operations
+   → Intentional trade-off with security
+
+4. Debugging is difficult
+   → Only serial logs. Designed with the assumption AI will read them.
 ```
 
----
-
-### unikernelが「最適」なアプリの定義
+#### Temporary limitations (solvable through implementation)
 
 ```
-以下を満たすとき、unikernelは最適解になる:
-
-1. 入力 → 変換 → 出力 の形に落とせる
-2. 環境（OS・ハードウェア）を観測する必要がない
-3. 状態は外部（Alpine・DB・レジストリ）に持てる
-4. セキュリティ境界として機能することが価値になる
-5. AIが生成・管理する
-
-逆に言うと:
-「環境そのものを扱うソフトウェア」はLinux（Alpine）が担うべき。
-それはunikernelの失敗ではなく、設計の正しい使い分け。
-```
-
-ネットワーク監視アプリはunikernelの限界を示したのではなく、**Alpine・unikernel・ブラウザをどう使い分けるかという設計判断の基準を明確にした**。
-
----
-
-## 結論
-
-「p2pquake APIのデータを取ってJSON/UIで返す」という本質的なロジックは、
-Flask版でもUnikernel版でも**約80行・同等の複雑さ**である。
-
-違いは**その周囲に積み上がった「人間のための」レイヤー**にある。
-
-AIが開発主体となる時代において、人間のために設計された中間レイヤーは：
-
-- **物理資源を20〜55倍消費し**
-- **AIの推論コストを毎回ゼロから発生させ**
-- **セキュリティ露出面を55倍以上広げ**
-- **デプロイに100倍以上の時間をかけ**
-- **スケールしても効率が改善しない**
-
-Unikernel + レジストリ + AIは、これを**設計の前提から**解決する。
-
-```
-「AIが主体なら、人間用に設計された中間レイヤーはそもそも必要か？」
-```
-
-——この問いへの実証的な答えが本プロジェクトである。
-
----
-
-## 17. 第2アプリ実装記録：Web テキストエディタ（2026-03-09）
-
-### アプリ概要
-
-複数ユーザー対応のWebテキストエディタ（2秒ポーリング、`/doc/` にファイル保存、再編集可能）。
-地震モニターに続く2本目のアプリとして、両構成で実装。
-
-### 実装プロセスの記録
-
-#### Docker版（Flask + nginx + Docker Compose）
-
-```
-作成ファイル               行数
-────────────────────────────────
-app.py                      53
-requirements.txt             2
-Dockerfile                   8
-nginx/nginx.conf            11
-docker-compose.yml          16
-editor_ui.html             152
-────────────────────────────────
-合計生成コード行数         242行
-推定生成トークン        ~3,600
-```
-
-特徴:
-- 新規ファイル6点、すべてゼロから作成
-- インフラ設定（nginx/Docker/gunicorn）が37行 = コードの15%がアプリ本体以外
-- editor_ui.html 152行のうち約80行がHTTP/Fetch/ポーリングのボイラープレート
-
-#### Unikernel WASM版
-
-```
-作成/変更ファイル          行数   種別
-────────────────────────────────────────
-wasm/editor.wat            301   新規（WASMアプリ本体）
-wasm/editor_ui.html        493   新規（UI）
-src/registry.rs              6   変更（ルーティング登録2行 + コメント）
-────────────────────────────────────────
-合計生成コード行数         800行
-推定生成トークン       ~12,000
-エージェント消費トークン  76,686（コンテキスト読み込み込み）
-```
-
-特徴:
-- 既存のホスト関数（`file_read` / `file_write` / `file_list`）をそのまま使用
-- インフラ変更: registry.rs への2行追加のみ（nginx.conf / docker-compose.yml 等ゼロ）
-- WASM版はUIが充実した分 editor_ui.html が長い（Dockerと同一UIを目指したため）
-
-### エージェント実消費トークンの内訳分析
-
-```
-Unikernel WASM版エージェント: 76,686トークン
-  内訳（推定）:
-    既存コードのコンテキスト読み込み:
-      wasm_rt.rs (296行) + net.rs (~200行) + bbs.wat (134行)
-      vsock.rs (666行) + main.rs + registry.rs     ~14,000
-    コード生成（editor.wat + editor_ui.html）:     ~15,000
-    デバッグ・修正ループ（路のパス修正等）:         ~47,000
-    ────────────────────────────────────────────
-    合計:                                          ~76,000
-
-Docker版（自分で実装）: ~6,000トークン推計
-    コード生成（242行）:                            ~3,600
-    設計・判断:                                     ~2,400
-```
-
-デバッグループが総トークンの61%。WATはアセンブリ相当のため修正コストが高い。
-
-### 2本目アプリの積み上げ効果
-
-比較レポート3章の予測との照合:
-
-```
-予測（3章）:
-  Flask 10本目:     $2.50（毎回 $0.25、線形増加）
-  Unikernel 10本目: $0.55（コンポーネント蓄積で逓減）
-
-実測（2本目）:
-  Flask 2本目:     $0.25（初回と変わらず）
-  Unikernel 2本目: コンテキスト削減の効果あり
-    - インフラ設定: 0行（docker-compose.yml / nginx.conf 不要）
-    - ルーティング登録: 2行（registry.rsへの追加のみ）
-    → 「インフラを毎回ゼロから考える」コストがなくなっている
-```
-
-### file_read/file_write/file_list の再利用
-
-今回の最大の発見: `wasm_rt.rs` にファイルI/Oホスト関数がすでに実装済みだった。
-
-```
-地震モニター（app.wasm）  → get_feed() を使用
-BBS（bbs.wasm）          → メモリ内のみ（ファイルなし）
-テキストエディタ（editor.wasm）→ file_read/file_write/file_list を初使用
-```
-
-これは「コンポーネント層」が実際に機能した最初の例。
-- vsock経由のファイルI/Oが「一度実装 → 複数アプリで再利用」を実現
-- 3本目以降のアプリでもこのホスト関数は追加コストゼロで使える
-
-### 実測サイズ
-
-```
-コンポーネント           Docker版        Unikernel版
-──────────────────────────────────────────────────
-アプリバイナリ           ~400MB（イメージ）  1,525バイト（editor.wasm）
-UI HTML                  152行              493行（同一機能・リッチ版）
-起動時間                 ~27秒              ~1秒（既存、変わらず）
-インフラ追加             37行（設定ファイル） 2行（registry.rs）
-デプロイコマンド         docker-compose up  ./deploy_wasm.sh
+1. No TLS   → Solved by terminating at the Alpine layer
+2. No DNS   → Can be handled by Alpine-layer resolution
+3. Single NIC → Can be addressed by extending smoltcp
 ```
 
 ---
 
-*第2アプリ実装: 2026-03-09。editor.wasm 1,525バイト（実測）。
-Docker版はポート8081、Unikernel版は既存8080でルーティング追加。*
+### Defining When a Unikernel Is the "Optimal" Choice
+
+```
+A unikernel becomes the optimal solution when:
+
+1. The problem maps to input → transform → output
+2. There is no need to observe the environment (OS, hardware)
+3. State can be held externally (Alpine, DB, registry)
+4. Functioning as a security boundary provides value
+5. AI generates and manages it
+
+Conversely:
+"Software that directly manipulates the environment" should be handled by Linux (Alpine).
+That is not a failure of the unikernel — it is the correct division of responsibilities.
+```
+
+The network monitoring application did not reveal the limits of the unikernel. Rather, it **clarified the criteria for deciding how to divide responsibilities among Alpine, the unikernel, and the browser**.
 
 ---
 
-*実測値: unikernelバイナリ 1.7MB、app.wasm 557B、bbs.wasm 1.2KB、
-eq_ui.html 9.9KB、起動時間 ~1秒、メモリ ~8MB（KVMゲスト実測）。
-推計値はUbuntu 22.04 Server最小構成 + 標準的Flask構成 + NVDデータ等を参照。
-電力・CO2数値は業界標準係数を使用した推計値。実環境により変動する。*
+## Conclusion
 
-*データソース統一（2026-03-08〜）: 両構成ともp2pquake API使用。Apple-to-Apple比較。*
+The essential logic of "fetch data from the p2pquake API and return it as JSON/UI" is, in both the Flask and Unikernel implementations, **approximately 80 lines and comparable in complexity**.
+
+The difference lies in **the "human-oriented" layers that have accumulated around it**.
+
+In an era where AI is the primary developer, the intermediate layers designed for humans:
+
+- **Consume 20–55x more physical resources**
+- **Force AI to incur the same reasoning cost from scratch every time**
+- **Expand the security attack surface by 55x or more**
+- **Take 100x or more longer to deploy**
+- **Show no improvement in efficiency even at scale**
+
+Unikernel + Registry + AI resolves these issues **at the level of design assumptions**.
+
+```
+"If AI is the primary actor, are the intermediate layers designed for humans even necessary?"
+```
+
+— This project is an empirical answer to that question.
+
+---
+
+## 17. Second Application Implementation Log: Web Text Editor (2026-03-09)
+
+### Application Overview
+
+A multi-user web text editor (2-second polling, saves files to `/doc/`, supports re-editing).
+Implemented in both configurations as the second application after the earthquake monitor.
+
+### Implementation Process Log
+
+#### Docker version (Flask + nginx + Docker Compose)
+
+```
+File created                Lines
+──────────────────────────────────
+app.py                         53
+requirements.txt                2
+Dockerfile                      8
+nginx/nginx.conf               11
+docker-compose.yml             16
+editor_ui.html                152
+──────────────────────────────────
+Total lines generated         242
+Estimated tokens generated  ~3,600
+```
+
+Characteristics:
+- 6 new files, all created from scratch
+- Infrastructure config (nginx/Docker/gunicorn) is 37 lines = 15% of the code is non-application
+- Of editor_ui.html's 152 lines, ~80 are HTTP/Fetch/polling boilerplate
+
+#### Unikernel WASM version
+
+```
+File created/modified       Lines   Type
+────────────────────────────────────────────
+wasm/editor.wat               301   New (WASM application)
+wasm/editor_ui.html           493   New (UI)
+src/registry.rs                 6   Modified (2 routing lines + comments)
+────────────────────────────────────────────
+Total lines generated         800
+Estimated tokens generated  ~12,000
+Agent total token consumption 76,686 (including context loading)
+```
+
+Characteristics:
+- Used existing host functions (`file_read` / `file_write` / `file_list`) as-is
+- Infrastructure changes: only 2 lines added to registry.rs (no nginx.conf / docker-compose.yml changes)
+- WASM version has a longer editor_ui.html due to richer UI (aiming for parity with the Docker version)
+
+### Analysis of Actual Agent Token Consumption
+
+```
+Unikernel WASM agent: 76,686 tokens
+  Breakdown (estimated):
+    Loading existing code into context:
+      wasm_rt.rs (296 lines) + net.rs (~200 lines) + bbs.wat (134 lines)
+      vsock.rs (666 lines) + main.rs + registry.rs            ~14,000
+    Code generation (editor.wat + editor_ui.html):            ~15,000
+    Debugging / correction loop (path fixes, etc.):           ~47,000
+    ─────────────────────────────────────────────────────────────────
+    Total:                                                    ~76,000
+
+Docker version (self-implemented): ~6,000 tokens estimated
+    Code generation (242 lines):                               ~3,600
+    Design / decision-making:                                  ~2,400
+```
+
+The debugging loop accounted for 61% of total tokens. WAT is assembly-equivalent, so correction costs are high.
+
+### Cumulative Benefits of the Second Application
+
+Comparing against the predictions in Section 3:
+
+```
+Prediction (Section 3):
+  Flask 10th app:     $2.50 (constant $0.25 each, linear growth)
+  Unikernel 10th app: $0.55 (decreasing due to component accumulation)
+
+Actual (2nd app):
+  Flask 2nd app:     $0.25 (same as the first)
+  Unikernel 2nd app: Context reduction benefits visible
+    - Infrastructure config: 0 lines (no docker-compose.yml / nginx.conf needed)
+    - Routing registration: 2 lines (only additions to registry.rs)
+    → The cost of "thinking through infrastructure from scratch every time" is gone
+```
+
+### Reuse of file_read/file_write/file_list
+
+The biggest discovery from this implementation: `wasm_rt.rs` already had file I/O host functions implemented.
+
+```
+Earthquake monitor (app.wasm)    → uses get_feed()
+BBS (bbs.wasm)                   → in-memory only (no files)
+Text editor (editor.wasm)        → uses file_read/file_write/file_list for the first time
+```
+
+This is the first real-world example of the "component layer" functioning as designed.
+- File I/O via vsock achieved "implement once → reuse across multiple apps"
+- For the 3rd and subsequent apps, these host functions are available at zero additional cost
+
+### Measured Sizes
+
+```
+Component                Docker version         Unikernel version
+──────────────────────────────────────────────────────────────────
+App binary               ~400MB (image)         1,525 bytes (editor.wasm)
+UI HTML                  152 lines              493 lines (same features, richer version)
+Boot time                ~27 seconds            ~1 second (unchanged)
+Infrastructure added     37 lines (config files) 2 lines (registry.rs)
+Deploy command           docker-compose up      ./deploy_wasm.sh
+```
+
+---
+
+*Second application implemented: 2026-03-09. editor.wasm 1,525 bytes (measured).
+Docker version on port 8081, Unikernel version adds routing to existing port 8080.*
+
+---
+
+*Measured values: unikernel binary 1.7MB, app.wasm 557B, bbs.wasm 1.2KB,
+eq_ui.html 9.9KB, boot time ~1 second, memory ~8MB (KVM guest, measured).
+Estimated values reference Ubuntu 22.04 Server minimal configuration + standard Flask setup + NVD data, etc.
+Power and CO2 figures are estimates using industry-standard coefficients. Actual values vary by environment.*
+
+*Unified data source (from 2026-03-08): both configurations use the p2pquake API. Apple-to-Apple comparison.*
