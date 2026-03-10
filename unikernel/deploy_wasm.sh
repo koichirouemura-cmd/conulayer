@@ -2,7 +2,7 @@
 # deploy_wasm.sh — WASMのみをレジストリに更新（カーネル再ビルド不要）
 set -euo pipefail
 
-ALPINE_HOST="root@192.168.10.127"
+ALPINE_HOST="${ALPINE_HOST:-root@YOUR_ALPINE_IP}"
 
 echo "==> WAT → WASM コンパイル..."
 wat2wasm "wasm/app.wat"    -o "wasm/app.wasm"

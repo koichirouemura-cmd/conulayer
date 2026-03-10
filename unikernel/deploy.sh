@@ -2,7 +2,7 @@
 # deploy.sh — ビルド → GRUB ISO 作成 → Alpine に転送 → サービス再起動
 set -euo pipefail
 
-ALPINE_HOST="root@192.168.10.127"
+ALPINE_HOST="${ALPINE_HOST:-root@YOUR_ALPINE_IP}"
 REMOTE_ISO="/root/unikernel.iso"
 KERNEL="target/x86_64-unknown-none/release/unikernel"
 ISODIR="isodir"

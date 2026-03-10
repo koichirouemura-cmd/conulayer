@@ -6,3 +6,7 @@ disk.img
 .playwright-mcp/
 *.swp
 *~
+.env*
+*.pem
+*.key
+secrets/
