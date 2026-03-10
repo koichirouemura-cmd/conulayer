@@ -451,7 +451,6 @@ Unikernel:
 |---|---|---|---|
 | Annual electricity | 276 kWh | 14 kWh | 262 kWh |
 | CO2 equivalent | 138 kg-CO2 | 7 kg-CO2 | 131 kg-CO2 |
-| Electricity cost (¥25/kWh) | ¥6,900 | ¥350 | ¥6,550 |
 
 #### 1,000 applications in production (annual)
 
@@ -868,12 +867,11 @@ Unikernel:
 ```
                         Flask configuration    Unikernel     Savings
 ──────────────────────────────────────────────────────────────────────
-Server costs            4 × ¥600K            1 × ¥600K     ¥1.8M/year
-Electricity             10,512 kWh           2,628 kWh     ¥19,800/year
+Server costs            4 servers            1 server      3 servers/year
+Electricity             10,512 kWh           2,628 kWh     7,884 kWh/year
 AI coding               $25,000/year         $2,500/year   $22,500/year
-Security maintenance    2 engineer-weeks     Near zero     ~¥1M/year
+Security maintenance    2 engineer-weeks     Near zero     significant
 ──────────────────────────────────────────────────────────────────────
-Total savings:                                              ~¥5M/year
 CO2 reduction:                                              ~4 tonnes/year
 ```
 
@@ -1322,3 +1320,17 @@ Estimated values reference Ubuntu 22.04 Server minimal configuration + standard 
 Power and CO2 figures are estimates using industry-standard coefficients. Actual values vary by environment.*
 
 *Unified data source (from 2026-03-08): both configurations use the p2pquake API. Apple-to-Apple comparison.*
+
+---
+
+## A Note from the Author
+
+I'm not an engineer. I built this project with Claude Code, and the numbers above reflect what we actually measured.
+
+One thing I want to be honest about: the low-level code in this project — hand-written WAT (WebAssembly Text), `no_std` Rust, VirtIO drivers — was harder for Claude to handle than I expected. High-level languages like Python have years of public examples for AI to learn from. This kind of bare-metal code does not.
+
+There were many debugging loops. Some phases took far longer than they should have, not because the problem was hard, but because the AI had less to draw on.
+
+This is actually part of why I'm publishing this project. If this code and these debugging sessions become training data, future AI will handle this environment better. That directly reduces the development cost — in tokens, in time, in energy — for anyone who builds on this foundation.
+
+The energy efficiency numbers in this report are real. But the full vision only works if the AI tooling catches up. We're not there yet. This project is a step toward it.
