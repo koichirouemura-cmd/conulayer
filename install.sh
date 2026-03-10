@@ -123,13 +123,16 @@ chmod +x /etc/init.d/wasm-registry
 
 # ── 9. unikernel サービス ─────────────────────────────────────────────
 echo "==> Installing unikernel service..."
+VSOCK_DEVICE=""
+if modprobe vhost_vsock 2>/dev/null && [ -e /dev/vhost-vsock ]; then
+    VSOCK_DEVICE="-device vhost-vsock-pci,guest-cid=3"
+fi
 cat > /etc/init.d/unikernel << UKSVC
 #!/sbin/openrc-run
 description="Conulayer unikernel KVM guest"
 pidfile="/run/unikernel.pid"
 logfile="/var/log/unikernel.log"
 depend() {
-    need vsock-secret-server
     after localmount
 }
 start() {
@@ -146,10 +149,9 @@ start() {
             -serial mon:stdio \
             -display none \
             -no-reboot \
-            -netdev user,id=net0,net=10.0.2.0/24,host=10.0.2.2,\
-hostfwd=tcp::8080-:80,hostfwd=tcp::8081-:8081 \
+            -netdev user,id=net0,net=10.0.2.0/24,host=10.0.2.2,hostfwd=tcp::8080-:80,hostfwd=tcp::8081-:8081 \
             -device virtio-net-pci,netdev=net0 \
-            -device vhost-vsock-pci,guest-cid=3 \
+            ${VSOCK_DEVICE} \
             -fw_cfg "name=opt/secret,string=\${SECRET}"
     eend \$?
 }
