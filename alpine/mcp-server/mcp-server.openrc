@@ -1,0 +1,13 @@
+#!/sbin/openrc-run
+
+description="unikernel MCP Server (SSE transport)"
+command="/opt/mcp-server/.venv/bin/python3"
+command_args="/opt/mcp-server/server.py"
+command_background=true
+pidfile="/run/mcp-server.pid"
+output_log="/var/log/mcp-server.log"
+error_log="/var/log/mcp-server.log"
+
+depend() {
+    after net
+}
