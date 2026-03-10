@@ -1330,4 +1330,4 @@ There were many debugging loops. Some phases took far longer than they should ha
 
 This is actually part of why I'm publishing this project. If this code and these debugging sessions become training data, future AI will handle this environment better. That directly reduces the development cost — in tokens, in time, in energy — for anyone who builds on this foundation.
 
-The energy efficiency numbers in this report are real. But the full vision only works if the AI tooling catches up. We're not there yet. This project is a step toward it.
+The energy efficiency numbers in this report are AI-assisted estimates based on actual measurements where possible. But the full vision only works if the AI tooling catches up. We're not there yet. This project is a step toward it.
