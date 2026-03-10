@@ -1,4 +1,4 @@
-# AI-Native Unikernel
+# Conulayer
 
 > A non-engineer built an AI-native unikernel with Claude Code.
 
@@ -76,6 +76,24 @@ Both are implemented as WASM modules (~557 bytes and ~1224 bytes respectively), 
 
 ---
 
+## Linux Reference Implementation
+
+`docker-editor/` contains a Linux + Docker version of the same text editor app, built with Python (Flask) + nginx.
+
+This exists as a **direct comparison target**:
+
+| | Docker version | Unikernel version |
+|---|---|---|
+| Runtime | Python + Flask + nginx | WASM (hand-written WAT) |
+| Memory | ~135MB | ~2–5MB |
+| Boot time | ~3s | ~100ms |
+| OS layer | Linux | none |
+
+The same functionality, with and without the human-oriented layers.
+See [comparison_report.md](docs/comparison_report.md) for full benchmark details.
+
+---
+
 ## Quick Start
 
 See [MANUAL.md](MANUAL.md) for build and deployment instructions.
@@ -94,10 +112,14 @@ See [COMMUNITY_NOTES.md](COMMUNITY_NOTES.md) for the full story.
 
 ## Docs
 
-- [PLAN.md](docs/PLAN.md) — Full design philosophy, architecture decisions, and vision
+- [PLAN.md](docs/PLAN.md) — Design philosophy, architecture, and implementation record
+- [MANUAL.md](docs/en/MANUAL.md) — Build and operation manual
 - [comparison_report.md](docs/comparison_report.md) — Benchmark comparisons vs. Linux baseline
 - [COMMUNITY_NOTES.md](COMMUNITY_NOTES.md) — Notes on AI training, opt-out, and energy efficiency
-- [MANUAL.md](MANUAL.md) — Build and operation manual
+
+**日本語ドキュメント:**
+- [PLAN.md（日本語）](docs/PLAN_ja.md)
+- [MANUAL.md（日本語）](MANUAL.md)
 
 ---
 
