@@ -17,7 +17,7 @@ Claude Code
     ↓ MCP protocol
 MCP Server (running on Alpine Linux)
     ↓ HTTP POST /update
-unikernel (KVM guest)
+unikernel (KVM guest inside Alpine)
     ↓ hot-swap WASM module
 Your app is live
 ```
@@ -26,92 +26,138 @@ The MCP server is the bridge between Claude Code and the unikernel. Once set up,
 
 ---
 
-## Prerequisites
+## System Requirements
 
-- A hypervisor with KVM/QEMU support (Proxmox VE recommended)
-- Alpine Linux VM (the host for the MCP server and unikernel)
-- Claude Code installed on your Mac
-- `wat2wasm` on Alpine (`apk add wabt`)
+| Resource | Minimum | Recommended |
+|---|---|---|
+| CPU | 1 core (KVM-capable x86_64) | 2 cores |
+| RAM | 512MB | 1GB |
+| Disk | 4GB | 8GB |
 
----
-
-## Step 1: Set Up Alpine Linux
-
-Install a minimal Alpine Linux VM on your hypervisor.
-The VM needs:
-- Network access (so Claude Code can reach the MCP server)
-- KVM enabled (to run the unikernel as a nested VM)
-
----
-
-## Step 2: Deploy the vsock File Server
-
-On your Mac, from the project root:
-
-```bash
-# Set ALPINE_HOST to your Alpine VM's IP address
-ALPINE_HOST=192.168.x.x ./alpine/setup-file-server.sh
-```
-
-This installs and starts the vsock file server on Alpine, which handles communication between Alpine and the unikernel.
-
----
-
-## Step 3: Set Up the MCP Server on Alpine
-
-SSH into Alpine and run:
-
-```bash
-# Install dependencies
-apk add python3 py3-pip wabt
-
-# Copy server files
-mkdir -p /opt/mcp-server
-scp alpine/mcp-server/server.py root@[ALPINE_IP]:/opt/mcp-server/
-scp alpine/mcp-server/requirements.txt root@[ALPINE_IP]:/opt/mcp-server/
-scp alpine/mcp-server/mcp-server.openrc root@[ALPINE_IP]:/etc/init.d/mcp-server
-
-# On Alpine: install Python dependencies
-python3 -m venv /opt/mcp-server/.venv
-/opt/mcp-server/.venv/bin/pip install -r /opt/mcp-server/requirements.txt
-
-# Enable and start the service
-chmod +x /etc/init.d/mcp-server
-rc-update add mcp-server default
-rc-service mcp-server start
-```
-
-**Verify**: The MCP server is running on port 8090
-
-```bash
-curl http://[ALPINE_IP]:8090/sse
-# Should respond (SSE connection)
+**KVM is required.** Check with:
+```sh
+grep -c vmx /proc/cpuinfo   # Intel
+grep -c svm /proc/cpuinfo   # AMD
+# Any number > 0 means KVM is available
 ```
 
 ---
 
-## Step 4: Build and Deploy the Unikernel
+## Option A: Quick Install (Recommended)
 
-On your Mac:
+If you already have Alpine Linux running (on Proxmox or bare metal), run:
 
-```bash
-cd unikernel
-
-# Install build tools (first time only)
-brew install qemu i686-elf-grub
-rustup target add x86_64-unknown-none
-rustup component add rust-src llvm-tools-preview
-
-# Build and deploy to Alpine
-ALPINE_HOST=root@[ALPINE_IP] ./deploy.sh
+```sh
+curl -fsSL https://raw.githubusercontent.com/koichirouemura-cmd/conulayer/main/install.sh | sh
 ```
 
-This builds the unikernel, creates a GRUB ISO, transfers it to Alpine, and starts it as a KVM VM.
+This automatically:
+1. Installs required packages (QEMU, Python, wabt, socat)
+2. Downloads the unikernel ISO from GitHub Releases
+3. Sets up all services (vsock, MCP server, unikernel)
+4. Starts everything and prints the connection info
 
-**Verify**:
+When complete, you'll see:
+```
+============================================================
+  Conulayer installation complete!
 
-```bash
-ssh root@[ALPINE_IP] "grep '\[HTTP READY\]' /var/log/unikernel.log"
+  Earthquake Monitor: http://192.168.x.x:8080/
+  BBS:                http://192.168.x.x:8080/bbs
+
+  Claude Code MCP config (~/.claude.json):
+  {
+    "mcpServers": {
+      "unikernel": {
+        "type": "sse",
+        "url": "http://192.168.x.x:8090/sse"
+      }
+    }
+  }
+============================================================
+```
+
+Then jump to [Step 5: Connect Claude Code](#step-5-connect-claude-code).
+
+---
+
+## Option B: Manual Setup
+
+### Step 1: Create an Alpine Linux VM on Proxmox
+
+1. Download Alpine Linux ISO from https://alpinelinux.org/downloads/
+   - Choose **x86_64** → **Standard**
+
+2. In Proxmox web UI, click **Create VM**:
+
+   | Setting | Value |
+   |---|---|
+   | OS | Alpine Linux ISO (uploaded to Proxmox) |
+   | CPU | 2 cores |
+   | RAM | 1024 MB |
+   | Disk | 8 GB |
+   | Network | VirtIO, bridge to your LAN |
+   | **Enable KVM** | ✅ must be checked |
+
+3. Start the VM and run Alpine setup:
+
+```sh
+setup-alpine
+```
+
+Follow the prompts:
+- Keyboard: `us` (or your layout)
+- Hostname: `conulayer`
+- Network: `eth0` → DHCP
+- Root password: set something
+- Disk: `sda` → `sys` (full install)
+- Reboot when done
+
+4. After reboot, note the IP address:
+
+```sh
+ip addr show eth0
+```
+
+---
+
+### Step 2: Install Conulayer on Alpine
+
+SSH into Alpine from your Mac:
+
+```sh
+ssh root@[ALPINE_IP]
+```
+
+Run the install script:
+
+```sh
+apk add curl
+curl -fsSL https://raw.githubusercontent.com/koichirouemura-cmd/conulayer/main/install.sh | sh
+```
+
+---
+
+### Step 3: Verify Services
+
+```sh
+# Check all services are running
+rc-status
+
+# Check unikernel booted
+grep '\[HTTP READY\]' /var/log/unikernel.log
+
+# Check HTTP response
+curl http://localhost:8080/
+```
+
+---
+
+### Step 4: Test from your Mac
+
+```sh
+curl http://[ALPINE_IP]:8080/
+# Should return the earthquake monitor HTML
 ```
 
 ---
@@ -120,7 +166,7 @@ ssh root@[ALPINE_IP] "grep '\[HTTP READY\]' /var/log/unikernel.log"
 
 Add the MCP server to Claude Code's configuration.
 
-Edit `~/.claude.json` and add under your project's `mcpServers`:
+Edit `~/.claude.json` on your Mac and add under your project's `mcpServers`:
 
 ```json
 {
@@ -148,12 +194,8 @@ Once connected, you can talk to Claude Code naturally:
 **Check status:**
 > "Is the unikernel running?"
 
-Claude calls `get_status()` and reports back.
-
 **Read logs:**
 > "Show me the last 20 lines of the unikernel log"
-
-Claude calls `get_logs(20)`.
 
 **Deploy a new app:**
 > "Write a WASM module that returns the current time as JSON and deploy it to /time"
@@ -192,6 +234,7 @@ The unikernel writes structured logs. Key markers:
 | Symptom | Check |
 |---|---|
 | MCP tools not appearing in Claude Code | Verify `~/.claude.json` config and restart Claude Code |
-| `get_status()` returns connection error | Check unikernel log for `[HTTP READY]`; check Alpine port forwarding |
+| `get_status()` returns connection error | Check unikernel log for `[HTTP READY]`; check Alpine port 8080 |
 | `deploy_wasm` fails with wat2wasm error | Check WAT syntax; ensure `wabt` is installed on Alpine |
-| Unikernel not booting | SSH to Alpine, check `tail -f /var/log/unikernel.log` |
+| Unikernel not booting | `tail -f /var/log/unikernel.log` on Alpine |
+| KVM not available | Check CPU virtualization is enabled in BIOS/Proxmox VM settings |

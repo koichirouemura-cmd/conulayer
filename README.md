@@ -96,7 +96,13 @@ See [comparison_report.md](docs/comparison_report.md) for full benchmark details
 
 ## Quick Start
 
-See [MANUAL.md](docs/MANUAL.md) for setup and Claude Code integration instructions.
+On a fresh Alpine Linux (physical or Proxmox VM):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/koichirouemura-cmd/conulayer/main/install.sh | sh
+```
+
+This installs everything and prints the Claude Code MCP config. See [MANUAL.md](docs/MANUAL.md) for full setup instructions including Proxmox VM creation.
 
 ---
 
