@@ -37,5 +37,5 @@ for i in $(seq 1 30); do
 done
 
 echo "==> HTTP 疎通確認..."
-RESP=$(curl -s --max-time 5 http://192.168.10.127:8080/ 2>/dev/null || true)
+RESP=$(curl -s --max-time 5 http://YOUR_ALPINE_HOST:8080/ 2>/dev/null || true)
 echo "   レスポンス: $RESP"

@@ -1004,7 +1004,7 @@ This project's originality:
 
 ### What the Network Monitor Application Revealed
 
-In parallel with this project, a network monitoring application was found to be running on the same host (192.168.10.126). This application uses ARP spoofing to measure traffic from other devices and dynamically display a device map.
+In parallel with this project, a network monitoring application was found to be running on the same host (YOUR_ALPINE_HOST). This application uses ARP spoofing to measure traffic from other devices and dynamically display a device map.
 
 Attempting to implement this monitoring application as a unikernel runs into a fundamental wall.
 
