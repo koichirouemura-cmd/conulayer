@@ -1,115 +1,123 @@
-# Architecture Considerations — Unikernel の設計判断メモ
+# Architecture Considerations
 
-このドキュメントは、プロジェクト開発中の考察を記録したものです。
-設計判断の背景・哲学的な問いを残しておくことで、将来の開発者（人間・AI）が意図を理解できるようにします。
-
----
-
-## 1. unikernel の起動速度が「効く」アプリとは
-
-unikernel の最大の特徴のひとつは起動速度（~100ms）です。
-しかし「常時起動で動き続けるアプリ」では Linux との差はほとんど出ません。
-
-### ◎ 効果が大きいカテゴリ
-
-**サーバーレス / FaaS（最も相性がいい）**
-
-「リクエストが来たら起動、終わったら消える」モデル。
-- Linux コンテナ: コールドスタート 200ms〜1秒
-- unikernel: 100ms 以下
-
-レイテンシが直接ユーザー体験に出る。現在の AWS Lambda 相当の仕組みをunikernelで置き換えると根本的に変わる可能性がある。
-
-**IoT / エッジデバイス**
-
-センサーが反応したときだけ起動して処理して眠る、というパターン。
-- バッテリー消費が直接変わる
-- メモリ数MB しかないデバイスでも動く
-- Linux を乗せられないハードウェアでも動作可能
-
-**セキュリティが厳しい用途**
-
-unikernel は「必要な機能だけ」しか持たない。
-- シェルがない → シェルインジェクション不可能
-- カーネルの攻撃面が激減
-- 金融・医療の処理ノードなどに向く
-
-**マイクロサービスの大量並列起動**
-
-1000 個のサービスを一斉に立ち上げるとき、100ms vs 3秒 は全体で数十倍の差になる。
-
-### △ あまり効果がないカテゴリ
-
-- 長時間動き続けるサービス（DBサーバー、Webサーバー）→ 起動は一度だけ
-- 開発中のアプリ → 頻繁にデバッグが必要、ツールがないと辛い
-- 複雑な状態管理が必要なもの → ファイルシステムや複数プロセス連携が前提
-
-### このプロジェクトの地震モニターについて
-
-地震モニターは「常時起動アプリ」なので起動速度の恩恵は少ない。
-本プロジェクトの本質的な価値は**メモリ効率**（105MB → 2MB）と
-**AI が自律的にデプロイできる構造**の方にある。
-
-**本当に unikernel が輝くのは**、AI エージェントが
-「このタスクに必要な機能だけ持つ最小 VM を 100ms で起動して処理して消す」
-という使い方。それが実現すると、今のサーバーレスの概念が根本から変わる。
+This document records design discussions and architectural thinking that emerged during development.
+Preserving the reasoning behind decisions helps future contributors — human or AI — understand the intent.
 
 ---
 
-## 2. Alpine Linux を母体にしていると、unikernel の優位性は成立するか
+## 1. What kinds of applications benefit most from unikernel fast startup?
 
-### 現在の構成
+One of the key properties of a unikernel is fast boot time (~100ms).
+However, for applications that run continuously once started, the advantage over Linux is minimal.
+The real benefit appears when **startup happens frequently** or **startup latency is user-facing**.
+
+### High impact categories
+
+**Serverless / FaaS (best fit)**
+
+"Boot on request, disappear when done" — the serverless model.
+- Linux container cold start: 200ms–1s
+- Unikernel: under 100ms
+
+Latency translates directly into user experience here.
+Replacing the Linux container layer in AWS Lambda-equivalent infrastructure with unikernels would be a fundamental shift.
+
+**IoT / Edge devices**
+
+Wake on sensor event, process, sleep.
+- Battery life changes directly
+- Runs on devices with only a few MB of RAM
+- Works on hardware that cannot run Linux
+
+**Security-sensitive workloads**
+
+Unikernels contain only what is needed — nothing more.
+- No shell → shell injection is structurally impossible
+- Drastically reduced kernel attack surface
+- Natural fit for financial and medical processing nodes
+
+**Large-scale parallel microservice startup**
+
+When 1,000 services need to start simultaneously, 100ms vs 3s compounds into an order-of-magnitude difference.
+
+### Lower impact categories
+
+- Long-running services (database servers, web servers) — they only boot once
+- Applications under active development — lack of debugging tools is painful
+- Applications requiring complex state — multiple processes and filesystems are assumed
+
+### Note on the earthquake monitor in this project
+
+The earthquake monitor is a continuously-running service, so it gains little from fast boot.
+The more meaningful advantages of this project are **memory efficiency** (105MB → 2MB)
+and **the structure that allows AI to autonomously deploy**.
+
+The scenario where unikernels truly shine is:
+an AI agent spins up a minimal VM containing only the functions needed for a task,
+processes it in 100ms, and tears it down.
+That model would fundamentally redefine what serverless means today.
+
+---
+
+## 2. Does the unikernel advantage hold when Alpine Linux is the host?
+
+### Current architecture
 
 ```
-Proxmox
-  └── Alpine Linux VM（常時起動、~100MB）
-        └── KVM ゲストとして unikernel を起動
-              └── Rust + WASM アプリ（~2-5MB、100ms）
+Hypervisor
+  └── Alpine Linux VM  (always running)
+        └── unikernel launched as KVM guest
+              └── Rust + WASM application  (~2–5 MB, ~100ms boot)
 ```
 
-Alpine が「台座」として常に動いている。
+Alpine acts as a permanent base layer.
 
-### 比較の正確な構図
+### What is actually being compared
 
-「Alpine + unikernel」と「Alpine + Python」の比較になっている。
+The real comparison is **Alpine + unikernel** vs **Alpine + Python**.
 
 | | Alpine + unikernel | Alpine + Python |
 |---|---|---|
-| Alpine のコスト | 同じ | 同じ |
-| アプリ層のコスト | +2-5MB、+100ms | +100MB、+3秒 |
+| Alpine overhead | identical | identical |
+| Application layer | +2–5 MB, ~100ms | +100 MB, ~3s |
 
-Alpine の固定コストは両者で相殺されるため、**アプリ層の差は依然として成立する。**
+Since Alpine's fixed cost cancels out on both sides,
+**the application-layer difference remains valid.**
 
-### 正直な評価
+### An honest assessment
 
-「Alpine なしで unikernel だけ」が本来のビジョン。
+Running unikernel without Alpine is the original vision.
+Alpine is currently required for:
+- File and module management (storing WASM modules)
+- Secret management (via vsock)
+- Unikernel lifecycle management (start, stop, update)
 
-現状 Alpine が必要な理由：
-- ファイル管理（WASM モジュールの保存）
-- シークレット管理（vsock 経由）
-- unikernel の起動・管理
+Delegating these to Alpine is a pragmatic compromise for this stage of the project.
+If unikernels could coordinate with each other over a network to handle management tasks,
+Alpine would no longer be necessary.
 
-これらを Alpine に任せているのは「現段階での現実的な妥協」。
-将来的に unikernel 同士がネットワークで管理し合える仕組みができれば、Alpine も不要になる。
+**The accurate statement today:**
+- "The advantage holds at the application layer."
+- "The full potential of unikernel architecture is only partially realized."
 
-**現時点の正確な言い方：**
-- 「アプリ層だけで見れば優位性は成立する」
-- 「完全な unikernel の価値はまだ一部しか実現できていない」
+### Alpine as the equivalent of firmware
 
-### Alpine を「BIOS と同じ位置づけ」と考える
-
-Alpine は触らないインフラ＝BIOS と同じ位置づけ。
-AI 主体哲学を損なわない理由は、**アプリ層（unikernel）が AI によって自律生成・デプロイされる**から。
-Alpine は管理基盤として存在するが、アプリの実行・更新には関与しない。
+One way to think about it: Alpine is infrastructure that is never touched,
+analogous to BIOS or firmware.
+It does not undermine the AI-native philosophy because
+the application layer — the unikernel — is autonomously generated and deployed by AI.
+Alpine provides the management substrate but plays no role in application execution or updates.
 
 ---
 
-## 3. VM 構成（比較環境）
+## 3. Comparison environment
 
-| VM | IP | 実装 | 目的 |
-|---|---|---|---|
-| VM 103 | 192.168.10.127 | Alpine + unikernel (Rust + WASM) | 本番・AI 主体アーキテクチャ |
-| VM 105 | 192.168.10.130 | Alpine + Python stdlib | 比較対象・純 Linux アーキテクチャ |
+Two VMs running the same earthquake monitor with identical UI and data sources,
+differing only in the implementation layer.
 
-同じ UI・同じデータソース・同じ機能で、実装レイヤーだけ異なる比較環境。
-数字で優劣を語れる状態を意図的に作っている。
+| VM | Implementation | Purpose |
+|---|---|---|
+| unikernel host | Alpine Linux + unikernel (Rust + WASM) | Production — AI-native architecture |
+| linux host | Alpine Linux + Python stdlib | Baseline — pure Linux architecture |
+
+This setup was intentionally constructed to make the differences measurable and discussable with concrete numbers.
