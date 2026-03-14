@@ -411,6 +411,73 @@ Unikernel:
   Idle CPU:                     <0.5%
 ```
 
+### ⚠️ Current Reality: Measured Values on Proxmox (2026-03-15)
+
+The numbers above reflect the unikernel **in isolation**. In the current deployment, the unikernel runs inside QEMU on Alpine Linux. Actual Proxmox measurements tell a different story:
+
+```
+VM 105 — Alpine + Python (eq-server.py)      VM 106 — Alpine + QEMU + unikernel (KVM)
+─────────────────────────────────────         ──────────────────────────────────────────
+CPU:     1.3%                                 CPU:     11.5%
+Memory:  151 MB / 1024 MB (15%)               Memory:  296 MB / 1024 MB (29%)
+```
+
+**Python is ~9x lighter on CPU and uses half the memory.**
+
+#### Why the gap exists
+
+The unikernel itself remains lightweight (~8MB, <0.5% CPU). But it cannot run directly on Proxmox — it requires QEMU as a hardware emulation layer:
+
+```
+VM 106 total overhead
+  Alpine Linux (host OS)         ~80MB RAM
+  QEMU process (KVM guest)      ~150MB RAM  ← this is the dominant cost
+  nginx (JMA proxy)              ~10MB RAM
+  vsock servers + MCP            ~15MB RAM
+  unikernel (the actual app)      ~8MB RAM
+  ──────────────────────────────────────
+  Total                         ~296MB RAM
+
+VM 105 total overhead
+  Alpine Linux                   ~80MB RAM
+  Python process                 ~70MB RAM
+  ──────────────────────────────────────
+  Total                         ~151MB RAM
+```
+
+Additionally, QEMU introduces CPU overhead through **VM exits** — the constant context switching between the KVM guest (unikernel) and the host (Alpine). Even with KVM hardware acceleration, this polling overhead is non-trivial.
+
+#### What does hold up: deployment speed (measured 2026-03-15)
+
+Despite the resource overhead, the unikernel's deployment speed advantage over Docker is real and measurable:
+
+```
+unikernel (rc-service unikernel restart → HTTP READY):   ~5 seconds  ✅ measured on VM 106
+Docker container restart (existing image):               ~5–10 seconds
+Docker image rebuild + restart (new version deploy):     ~60–180 seconds
+```
+
+The critical difference is in **new version deployment**:
+
+- Docker: code change → `docker build` (compile + layer cache) → `docker push` → `docker pull` → `docker run`
+- Unikernel: download new `unikernel.iso` (9.5MB) → `rc-service unikernel restart` → done in ~5 seconds
+
+This advantage holds even in the current QEMU-on-VM setup. The deployment unit is a single immutable ISO file — no build step on the target machine, no dependency resolution, no layer management.
+
+#### What this means for the project
+
+This is not a flaw in the unikernel design — it is a **deployment layer problem**. The unikernel's theoretical advantage holds if run directly on bare-metal or a type-1 hypervisor without a Linux host layer. The current stack (Proxmox → Alpine → QEMU → unikernel) adds two unnecessary layers.
+
+The path to realizing the efficiency advantage:
+
+| Deployment method | Layers | Expected overhead |
+|---|---|---|
+| Current: Proxmox → Alpine → QEMU → unikernel | 4 | High (as measured) |
+| Proxmox → unikernel directly (virtio passthrough) | 2 | Medium |
+| Bare-metal → unikernel | 1 | Near zero (theoretical) |
+
+**The honest summary**: In the current QEMU-on-VM deployment, a simple Python process is more resource-efficient for this use case. The unikernel's advantages (security isolation, reproducibility, AI-native design) remain valid, but the resource efficiency claim requires a more direct execution path to be realized.
+
 ---
 
 ## 5. Energy Consumption and CO2 Emissions

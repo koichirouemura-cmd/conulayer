@@ -10,3 +10,4 @@ disk.img
 *.pem
 *.key
 secrets/
+docs/vm-access.md
